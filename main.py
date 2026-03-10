@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import pandas as pd
@@ -6,7 +7,9 @@ import numpy as np
 import os
 import math
 from typing import Optional
+from pydantic import BaseModel
 from datetime import datetime, timedelta
+import time
 
 app = FastAPI()
 
@@ -36,6 +39,7 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+CEP2_DIR = os.path.join(BASE_DIR, "cep 2")
 
 def load_gtfs():
     path = os.path.join(BASE_DIR, "gtfs_data")
@@ -71,6 +75,10 @@ STOP_TIMES_BY_TRIP = {
     str(trip_id): group.sort_values("stop_sequence").copy() for trip_id, group in STOP_TIMES.groupby("trip_id", sort=False)
 }
 STOPS_BY_ID = STOPS.drop_duplicates("stop_id").set_index("stop_id")
+STOP_NAME_TO_IDS = {
+    str(name): sorted(group["stop_id"].astype(str).tolist())
+    for name, group in STOPS.groupby("stop_name", sort=False)
+}
 STOP_COORDS_BY_ID = STOPS_BY_ID[["stop_lat", "stop_lon"]].copy()
 STOP_COORDS_BY_ID["stop_lat"] = STOP_COORDS_BY_ID["stop_lat"].astype(float)
 STOP_COORDS_BY_ID["stop_lon"] = STOP_COORDS_BY_ID["stop_lon"].astype(float)
@@ -82,6 +90,16 @@ MAX_START_TRIPS = 8
 MAX_TRANSFER_STOPS = 20
 MAX_TRANSFER_WAIT_SECONDS = 60 * 60
 MAX_TRANSFER_JUMP_KM = 0.5
+
+
+class BusLocationPayload(BaseModel):
+    bus_id: str
+    latitude: float
+    longitude: float
+    timestamp: Optional[str] = None
+
+
+BUS_LOCATIONS: dict[str, dict] = {}
 
 
 def parse_stop_ids(value: Optional[str]) -> list[str]:
@@ -137,33 +155,87 @@ def haversine_km_vectorized(lat1, lon1, lat2_series, lon2_series):
     a = np.sin(dlat / 2) ** 2 + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlon / 2) ** 2
     return 6371 * (2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a)))
 
-@app.get("/")
-def home(request: Request):
-    stops_for_ui = STOPS_UNIQUE[["stop_id", "stop_name"]].sort_values("stop_name").to_dict("records")
-    stop_map = {
-        str(name): sorted(group["stop_id"].astype(str).tolist())
-        for name, group in STOPS.groupby("stop_name", sort=False)
+
+def nearest_stop_from_coords(lat: float, lon: float) -> dict:
+    stops_copy = STOPS_UNIQUE.copy()
+    stops_copy["dist_km"] = haversine_km_vectorized(lat, lon, stops_copy["stop_lat"], stops_copy["stop_lon"])
+    nearest = stops_copy.nsmallest(1, "dist_km").iloc[0]
+    stop_name = str(nearest["stop_name"])
+    return {
+        "stop_name": stop_name,
+        "stop_ids": STOP_NAME_TO_IDS.get(stop_name, [str(nearest["stop_id"])]),
+        "stop_id": str(nearest["stop_id"]),
+        "stop_lat": float(nearest["stop_lat"]),
+        "stop_lon": float(nearest["stop_lon"]),
+        "distance_m": int(round(float(nearest["dist_km"]) * 1000)),
     }
 
-    # Station-name alias fix: merge Talegaon station variants to the same coordinate/id pool
-    talegaon_station_ids = sorted(
-        STOPS[
-            STOPS["stop_name"].isin(["Talegaon Station", "Talegaon Railway Station"])
-        ]["stop_id"].astype(str).tolist()
-    )
-    if talegaon_station_ids:
-        stop_map["Talegaon Station"] = talegaon_station_ids
-        stop_map["Talegaon Railway Station"] = talegaon_station_ids
+@app.get("/")
+def home():
+    return FileResponse(os.path.join(CEP2_DIR, "home.html"))
 
-    return templates.TemplateResponse("index.html", {
-        "request": request, 
-        "stops": stops_for_ui,
-        "stop_map": stop_map,
-        "current_time": clock.get_time()
-    })
+
+@app.get("/cep2/home")
+def cep2_home():
+    return FileResponse(os.path.join(CEP2_DIR, "home.html"))
+
+
+@app.get("/cep2/driver")
+def cep2_driver():
+    return FileResponse(os.path.join(CEP2_DIR, "driver.html"))
+
+
+@app.get("/api/stops")
+def get_stops():
+    stop_names = sorted(STOP_NAME_TO_IDS.keys())
+    return {
+        "stop_names": stop_names,
+        "stop_name_to_ids": STOP_NAME_TO_IDS,
+    }
+
+
+@app.get("/api/nearest-stop")
+def get_nearest_stop(lat: float, lon: float):
+    return nearest_stop_from_coords(lat, lon)
 
 @app.post("/api/tick")
 async def clock_tick(): return {"time": clock.tick(1)}
+
+
+@app.post("/api/bus-location")
+def update_bus_location(payload: BusLocationPayload):
+    bus_id = payload.bus_id.strip()
+    if not bus_id:
+        raise HTTPException(status_code=400, detail="Missing bus_id")
+
+    BUS_LOCATIONS[bus_id] = {
+        "bus_id": bus_id,
+        "latitude": payload.latitude,
+        "longitude": payload.longitude,
+        "timestamp": payload.timestamp or datetime.utcnow().isoformat(),
+        "lastUpdated": int(time.time() * 1000),
+    }
+    return {"success": True}
+
+
+@app.get("/api/bus-location")
+def get_bus_location(bus_id: str):
+    bus_id = bus_id.strip()
+    if not bus_id:
+        raise HTTPException(status_code=400, detail="Missing bus_id parameter")
+
+    location = BUS_LOCATIONS.get(bus_id)
+    if location is None:
+        raise HTTPException(status_code=404, detail="Bus location not found")
+
+    is_stale = int(time.time() * 1000) - int(location["lastUpdated"]) > 30000
+    return {
+        "bus_id": location["bus_id"],
+        "latitude": location["latitude"],
+        "longitude": location["longitude"],
+        "timestamp": location["timestamp"],
+        "isStale": is_stale,
+    }
 
 @app.get("/api/plan")
 def plan_route(end_id: str, u_lat: Optional[float] = None, u_lon: Optional[float] = None, start_id: Optional[str] = None):

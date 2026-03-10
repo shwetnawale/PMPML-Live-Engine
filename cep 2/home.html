@@ -47,6 +47,38 @@
         /* Custom Leaflet overrides */
         .leaflet-control-container .leaflet-routing-container-hide { display: none; }
         .leaflet-container { background: #e5e5f7; font-family: 'Inter', sans-serif; }
+
+        #tracking-map-card { position: relative; }
+        #map-fullscreen-btn {
+            position: absolute; top: 10px; right: 10px; z-index: 450;
+            background: rgba(255,255,255,0.95); border: 1px solid #e2e8f0;
+            border-radius: 10px; padding: 6px 10px; font-size: 11px; font-weight: 700;
+            color: #2f4858;
+        }
+        #map-fullscreen-info {
+            display: none;
+            position: absolute; top: 12px; left: 12px; z-index: 460;
+            background: rgba(255,255,255,0.96); border: 1px solid #e2e8f0; border-radius: 10px;
+            padding: 10px 12px; width: min(320px, calc(100vw - 24px));
+            box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+        }
+
+        .map-fullscreen-active #map-fullscreen-info { display: block; }
+        #tracking-map-card:fullscreen { background: #e5e5f7; }
+        #tracking-map-card:fullscreen #map { width: 100vw !important; height: 100vh !important; }
+        #tracking-map-card:fullscreen #map-fullscreen-btn { top: 14px; right: 14px; }
+        #tracking-map-card:fullscreen #map-fullscreen-info { top: 14px; left: 14px; }
+
+        @media (min-width: 900px) {
+            body { padding: 16px; }
+            .mobile-container {
+                max-width: 1200px; min-height: calc(100vh - 32px);
+                border: 1px solid #e2e8f0; border-radius: 16px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+                padding-bottom: 88px;
+            }
+            #map { height: 500px; }
+        }
     </style>
 </head>
 <body class="bg-gray-100 text-slate-800">
@@ -118,12 +150,13 @@
                     <div class="space-y-3.5">
                         <div class="relative">
                             <i class="fa-regular fa-circle-dot absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
-                            <input type="text" id="input-from" placeholder="From (Bus Stop)" class="w-full bg-[#f8fafc] border border-slate-200 rounded-lg py-2.5 pl-[38px] pr-3 text-sm font-medium focus:outline-none focus:border-brand-700 focus:bg-white transition-colors" value="Downtown">
+                            <input type="text" id="input-from" list="stops-list" placeholder="From (Bus Stop)" class="w-full bg-[#f8fafc] border border-slate-200 rounded-lg py-2.5 pl-[38px] pr-3 text-sm font-medium focus:outline-none focus:border-brand-700 focus:bg-white transition-colors">
                         </div>
                         <div class="relative">
                             <i class="fa-solid fa-location-dot absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
-                            <input type="text" id="input-to" placeholder="To (Bus Stop)" class="w-full bg-[#f8fafc] border border-slate-200 rounded-lg py-2.5 pl-[38px] pr-3 text-sm font-medium focus:outline-none focus:border-brand-700 focus:bg-white transition-colors" value="Akurdi">
+                            <input type="text" id="input-to" list="stops-list" placeholder="To (Bus Stop)" class="w-full bg-[#f8fafc] border border-slate-200 rounded-lg py-2.5 pl-[38px] pr-3 text-sm font-medium focus:outline-none focus:border-brand-700 focus:bg-white transition-colors">
                         </div>
+                        <datalist id="stops-list"></datalist>
                     </div>
                 </div>
 
@@ -198,9 +231,18 @@
                 </div>
 
                 <!-- MAP SECTION -->
-                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative">
+                <div id="tracking-map-card" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative">
                     <div class="absolute bottom-3 left-3 z-[400] bg-white text-[11px] font-bold px-3 py-1.5 rounded-lg shadow-md border border-slate-100 text-slate-700" id="route-badge">
                         Route --
+                    </div>
+                    <button id="map-fullscreen-btn" onclick="toggleMapFullscreen()" type="button"><i class="fa-solid fa-expand"></i> Fullscreen</button>
+                    <div id="map-fullscreen-info">
+                        <div class="text-[11px] font-bold text-slate-800 mb-1" id="fs-route">Route --</div>
+                        <div class="text-[11px] text-slate-600"><b>ETA:</b> <span id="fs-eta">--</span></div>
+                        <div class="text-[11px] text-slate-600"><b>Next Stop:</b> <span id="fs-next">--</span></div>
+                        <div class="text-[11px] text-slate-600"><b>From:</b> <span id="fs-from">--</span></div>
+                        <div class="text-[11px] text-slate-600"><b>To:</b> <span id="fs-to">--</span></div>
+                        <div class="text-[11px] text-slate-600"><b>Lat/Lng:</b> <span id="fs-coords">--</span></div>
                     </div>
                     <div id="map"></div>
                 </div>
@@ -342,23 +384,111 @@
         let liveInterval = null;
         let map = null;
         let busMarker = null;
+        let activeRouteLine = null;
+        let simulatedStepIndex = 0;
 
         // Mock State
         let isLoggedIn = false;
-        let pName = "";
         let pendingBooking = null;
+        let availableBuses = [];
+        let stopNames = [];
+        let stopNameToIds = {};
+        let stopNameLookupLower = {};
         let myTickets = [
             // Example past ticket to show history
             { ticket_id: "TKT-8291", bus_id: "BUS-11E", from: "Station", to: "Mall", passengers: 1, fare: "$1.50", status: "past", date: "Yesterday" }
         ];
 
-        // Mock data satisfying prompt details
-        const mockBuses = [
-            { id: "BUS-42-DOWNTOWN", route: "Route 42 - Sector A", eta: "3 minutes", distance: "1.2 km", lat: 18.6298, lng: 73.7997, next_stop: "Akurdi", baseFare: 2.50 },
-            { id: "BUS-22D", route: "Route 45 - Express", eta: "8 minutes", distance: "3.5 km", lat: 18.6320, lng: 73.8050, next_stop: "Nigdi", baseFare: 3.50 }
-        ];
-
         let currentActiveBus = null;
+
+        function updateFullscreenInfo() {
+            if (!currentActiveBus) return;
+            const fromVal = document.getElementById('input-from')?.value || '--';
+            const toVal = document.getElementById('input-to')?.value || '--';
+            const coords = `${Number(currentActiveBus.lat).toFixed(5)}, ${Number(currentActiveBus.lng).toFixed(5)}`;
+
+            document.getElementById('fs-route').innerText = currentActiveBus.route || '--';
+            document.getElementById('fs-eta').innerText = currentActiveBus.eta || '--';
+            document.getElementById('fs-next').innerText = currentActiveBus.next_stop || '--';
+            document.getElementById('fs-from').innerText = fromVal;
+            document.getElementById('fs-to').innerText = toVal;
+            document.getElementById('fs-coords').innerText = coords;
+        }
+
+        function refreshFullscreenState() {
+            const card = document.getElementById('tracking-map-card');
+            const btn = document.getElementById('map-fullscreen-btn');
+            const active = document.fullscreenElement === card;
+
+            document.body.classList.toggle('map-fullscreen-active', active);
+            if (btn) {
+                btn.innerHTML = active
+                    ? '<i class="fa-solid fa-compress"></i> Exit'
+                    : '<i class="fa-solid fa-expand"></i> Fullscreen';
+            }
+
+            if (map) {
+                setTimeout(() => map.invalidateSize(), 100);
+            }
+        }
+
+        function toggleMapFullscreen() {
+            const card = document.getElementById('tracking-map-card');
+            if (!card) return;
+
+            if (document.fullscreenElement === card) {
+                document.exitFullscreen();
+            } else {
+                card.requestFullscreen();
+            }
+        }
+
+        document.addEventListener('fullscreenchange', refreshFullscreenState);
+
+        async function loadStopsData() {
+            if (stopNames.length > 0) return;
+
+            const response = await fetch('/api/stops');
+            if (!response.ok) throw new Error('Unable to load stops');
+
+            const data = await response.json();
+            stopNames = data.stop_names || [];
+            stopNameToIds = data.stop_name_to_ids || {};
+            stopNameLookupLower = {};
+            Object.keys(stopNameToIds).forEach((name) => {
+                stopNameLookupLower[name.toLowerCase()] = stopNameToIds[name];
+            });
+
+            const list = document.getElementById('stops-list');
+            if (list) {
+                list.innerHTML = stopNames.map((name) => `<option value="${name}"></option>`).join('');
+            }
+        }
+
+        function getStopIdsByName(name) {
+            if (!name) return null;
+            return stopNameLookupLower[name.trim().toLowerCase()] || null;
+        }
+
+        function getUserPosition() {
+            return new Promise((resolve) => {
+                if (!navigator.geolocation) {
+                    resolve(null);
+                    return;
+                }
+
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        resolve({
+                            lat: position.coords.latitude,
+                            lon: position.coords.longitude,
+                        });
+                    },
+                    () => resolve(null),
+                    { enableHighAccuracy: true, timeout: 7000 }
+                );
+            });
+        }
 
         // Initialization
         function checkAuth() {
@@ -409,6 +539,7 @@
             mainHeader.classList.remove('hide');
             systemStatus.classList.remove('hide');
             mainNav.classList.remove('hide');
+            loadStopsData().catch(() => {});
             goSearch();
         }
 
@@ -421,6 +552,7 @@
         function goSearch() {
             clearInterval(liveInterval);
             updateNavColors('nav-search');
+            loadStopsData().catch(() => {});
             showView('view-search');
         }
 
@@ -437,20 +569,99 @@
             showView('view-results');
         }
 
-        function findBuses() {
+        async function findBuses() {
             const btn = document.getElementById('find-buses-btn');
             btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> SEARCHING...';
-            
-            setTimeout(() => {
-                btn.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> FIND BUSES';
+            btn.disabled = true;
+
+            try {
+                await loadStopsData();
+
+                const fromInput = document.getElementById('input-from');
+                const toInput = document.getElementById('input-to');
+                const fromName = (fromInput.value || '').trim();
+                const toName = (toInput.value || '').trim();
+
+                const endIds = getStopIdsByName(toName);
+                if (!endIds || endIds.length === 0) {
+                    alert('Please select a valid destination from dropdown suggestions.');
+                    return;
+                }
+
+                const params = new URLSearchParams({ end_id: endIds.join(',') });
+
+                if (fromName) {
+                    const startIds = getStopIdsByName(fromName);
+                    if (!startIds || startIds.length === 0) {
+                        alert('Please select a valid start stop from dropdown suggestions.');
+                        return;
+                    }
+                    params.set('start_id', startIds.join(','));
+                } else {
+                    const geo = await getUserPosition();
+                    if (!geo) {
+                        alert('Please enter a start stop or allow location access.');
+                        return;
+                    }
+
+                    params.set('u_lat', geo.lat);
+                    params.set('u_lon', geo.lon);
+
+                    const nearestRes = await fetch(`/api/nearest-stop?lat=${geo.lat}&lon=${geo.lon}`);
+                    if (nearestRes.ok) {
+                        const nearestData = await nearestRes.json();
+                        if (nearestData.stop_name) {
+                            fromInput.value = nearestData.stop_name;
+                        }
+                    }
+                }
+
+                const response = await fetch(`/api/plan?${params.toString()}`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch bus options');
+                }
+
+                const data = await response.json();
+                availableBuses = (data.options || []).map((opt, index) => {
+                    const polyline = Array.isArray(opt.polyline) ? opt.polyline : [];
+                    const firstPoint = polyline[0] || opt.start_coords || [18.5204, 73.8567];
+                    const etaMin = Number(opt.eta || 0);
+                    const departure = String(opt.departure || '--:--:--');
+                    return {
+                        id: `${String(opt.bus_no || 'BUS')}-${index}`,
+                        liveBusId: String(opt.bus_no || `BUS-${index + 1}`),
+                        route: opt.is_transfer ? `Transfer route (${departure})` : `Direct route (${departure})`,
+                        eta: `${etaMin} min`,
+                        distance: `${Number(opt.walk_dist || 0)} m walk`,
+                        lat: Number(firstPoint[0]),
+                        lng: Number(firstPoint[1]),
+                        next_stop: toName || 'Destination',
+                        baseFare: Math.max(2.5, Number((2.5 + etaMin * 0.05).toFixed(2))),
+                        polyline,
+                        departure,
+                        start_stop: String(opt.start_stop || fromInput.value || 'Nearby stop'),
+                    };
+                });
+
                 renderBusResults();
                 showView('view-results');
-            }, 600);
+            } catch (err) {
+                console.error(err);
+                alert('Unable to fetch buses right now. Please try again.');
+            } finally {
+                btn.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> FIND BUSES';
+                btn.disabled = false;
+            }
         }
 
         function renderBusResults() {
             busList.innerHTML = '';
-            mockBuses.forEach(bus => {
+            if (availableBuses.length === 0) {
+                busList.innerHTML = '<div class="text-center py-6 text-slate-400 text-sm font-medium bg-white rounded-xl border border-slate-200 shadow-sm">No buses found for selected route/time.</div>';
+                return;
+            }
+
+            availableBuses.forEach(bus => {
                 const card = document.createElement('div');
                 card.className = 'bg-white rounded-xl border border-slate-200 shadow-sm p-4 animate-fade-in flex flex-col gap-3';
                 card.innerHTML = `
@@ -460,29 +671,29 @@
                                 <i class="fa-solid fa-bus-simple text-sm"></i>
                             </div>
                             <div>
-                                <div class="font-bold text-[14px] text-slate-800 leading-tight">\${bus.id}</div>
-                                <div class="text-[11px] text-slate-500 font-medium mt-0.5">\${bus.route}</div>
+                                <div class="font-bold text-[14px] text-slate-800 leading-tight">${bus.id}</div>
+                                <div class="text-[11px] text-slate-500 font-medium mt-0.5">${bus.route}</div>
                             </div>
                         </div>
                         <div class="text-right">
                            <div class="text-[10px] uppercase font-bold text-slate-400 mb-0.5 tracking-wider">Distance</div>
-                           <div class="text-[13px] font-bold text-emerald-600">\${bus.distance}</div>
+                           <div class="text-[13px] font-bold text-emerald-600">${bus.distance}</div>
                         </div>
                     </div>
                     <div class="flex items-center justify-between pb-1 pt-1">
                         <div class="text-[12px] font-medium text-slate-500">
-                            ETA <span class="text-blue-600 font-bold ml-1 bg-blue-50 px-1.5 py-0.5 rounded">\${bus.eta}</span>
+                            ETA <span class="text-blue-600 font-bold ml-1 bg-blue-50 px-1.5 py-0.5 rounded">${bus.eta}</span>
                         </div>
                         <div class="text-[12px] font-medium text-slate-500">
-                            Next Stop <span class="font-bold text-slate-800 ml-1">\${bus.next_stop}</span>
+                            Next Stop <span class="font-bold text-slate-800 ml-1">${bus.next_stop}</span>
                         </div>
                     </div>
                     
                     <div class="flex gap-2 mt-1">
-                        <button onclick="startTracking('\${bus.id}')" class="flex-1 bg-[#f1f5f9] hover:bg-[#e2e8f0] text-slate-600 font-bold rounded-[10px] py-3 text-[12px] tracking-wide transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+                        <button onclick="startTracking('${bus.id}')" class="flex-1 bg-[#f1f5f9] hover:bg-[#e2e8f0] text-slate-600 font-bold rounded-[10px] py-3 text-[12px] tracking-wide transition-colors flex items-center justify-center gap-1.5 shadow-sm">
                             <i class="fa-solid fa-location-crosshairs"></i> TRACK
                         </button>
-                        <button onclick="startBooking('\${bus.id}')" class="flex-1 bg-[#344d67] hover:bg-[#2f4858] text-white font-bold rounded-[10px] py-3 text-[12px] tracking-wide transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+                        <button onclick="startBooking('${bus.id}')" class="flex-1 bg-[#344d67] hover:bg-[#2f4858] text-white font-bold rounded-[10px] py-3 text-[12px] tracking-wide transition-colors flex items-center justify-center gap-1.5 shadow-sm">
                             <i class="fa-solid fa-ticket"></i> BOOK
                         </button>
                     </div>
@@ -493,14 +704,16 @@
 
         // Live Tracking
         function startTracking(busId) {
-            const bus = mockBuses.find(b => b.id === busId);
+            const bus = availableBuses.find(b => b.id === busId) || availableBuses.find(b => b.liveBusId === busId);
             if (!bus) return;
             currentActiveBus = JSON.parse(JSON.stringify(bus));
+            simulatedStepIndex = 0;
 
-            document.getElementById('track-bus-id').innerText = bus.id;
+            document.getElementById('track-bus-id').innerText = bus.liveBusId;
             document.getElementById('route-badge').innerText = bus.route;
             document.getElementById('next-stop-val').innerText = bus.next_stop;
             document.getElementById('eta-val').innerText = bus.eta;
+            updateFullscreenInfo();
             
             showView('view-tracking');
             updateNavColors(null);
@@ -524,6 +737,16 @@
                 attribution: '&copy; OpenStreetMap'
             }).addTo(map);
 
+            if (activeRouteLine) {
+                map.removeLayer(activeRouteLine);
+                activeRouteLine = null;
+            }
+
+            if (Array.isArray(bus.polyline) && bus.polyline.length > 1) {
+                activeRouteLine = L.polyline(bus.polyline, {color: '#344d67', weight: 5, opacity: 0.8}).addTo(map);
+                map.fitBounds(activeRouteLine.getBounds(), {padding: [30, 30]});
+            }
+
             const busDivIcon = L.divIcon({
                 className: 'custom-div-icon',
                 html: "<div style='background-color:#2f4858;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3);'><i class='fa-solid fa-bus text-[12px]'></i></div>",
@@ -541,19 +764,35 @@
             
             const now = new Date();
             document.getElementById('update-time').innerText = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+            if (currentActiveBus) {
+                currentActiveBus.lat = lat;
+                currentActiveBus.lng = lng;
+                updateFullscreenInfo();
+            }
         }
 
         async function updateLiveLocation() {
             if(!currentActiveBus || !map || !busMarker) return;
 
             try {
-                const response = await fetch(`http://localhost:3000/api/bus-location?bus_id=${currentActiveBus.id}`);
+                const response = await fetch(`/api/bus-location?bus_id=${currentActiveBus.liveBusId}`);
                 if (!response.ok) {
-                    console.log('Bus location not found yet on server.');
+                    if (Array.isArray(currentActiveBus.polyline) && currentActiveBus.polyline.length > 1) {
+                        simulatedStepIndex = (simulatedStepIndex + 1) % currentActiveBus.polyline.length;
+                        currentActiveBus.lat = Number(currentActiveBus.polyline[simulatedStepIndex][0]);
+                        currentActiveBus.lng = Number(currentActiveBus.polyline[simulatedStepIndex][1]);
+                        busMarker.setLatLng([currentActiveBus.lat, currentActiveBus.lng]);
+                        map.panTo([currentActiveBus.lat, currentActiveBus.lng], {animate: true, duration: 1.2});
+                        updateTelemetryUI(currentActiveBus.lat, currentActiveBus.lng);
+                    }
                     return;
                 }
 
                 const data = await response.json();
+                if (typeof data.latitude !== 'number' || typeof data.longitude !== 'number') {
+                    console.log('Invalid location payload for bus:', currentActiveBus.id);
+                    return;
+                }
                 
                 // Update active bus loc
                 currentActiveBus.lat = data.latitude;
@@ -570,6 +809,7 @@
                     if(currMinutes > 1) {
                         currentActiveBus.eta = (currMinutes - 1) + " minutes";
                         document.getElementById('eta-val').innerText = currentActiveBus.eta;
+                        updateFullscreenInfo();
                     }
                 }
             } catch (err) {
@@ -586,14 +826,14 @@
 
         function startBooking(busId) {
             clearInterval(liveInterval);
-            const bus = mockBuses.find(b => b.id === busId);
+            const bus = availableBuses.find(b => b.id === busId) || availableBuses.find(b => b.liveBusId === busId);
             if (!bus) return;
 
             pendingBooking = {
-                bus_id: bus.id,
+                bus_id: bus.liveBusId,
                 route: bus.route,
-                from: document.getElementById('input-from').value || "Downtown",
-                to: document.getElementById('input-to').value || "Akurdi",
+                from: document.getElementById('input-from').value || bus.start_stop || "Current Stop",
+                to: document.getElementById('input-to').value || bus.next_stop || "Destination",
                 baseFare: bus.baseFare,
                 passengers: 1,
                 totalFare: bus.baseFare
