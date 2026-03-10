@@ -1,0 +1,17 @@
+Use these PowerShell commands from your project folder:
+
+Create venv:
+
+py -m venv .venv
+
+Activate venv:
+
+.\.venv\Scripts\Activate.ps1
+
+Upgrade pip (optional): 
+
+python -m pip install --upgrade pip
+
+Install dependencies: 
+
+pip install -r requirenments.txt
