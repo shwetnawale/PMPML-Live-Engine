@@ -45,8 +45,12 @@
     <div class="search-panel">
         <h2 style="margin: 0 0 15px 0; font-size: 20px; color: #3c4043;">CitySaarthi</h2>
         <div class="input-row">
+            <input list="s-list" id="startInput" placeholder="Start stop (optional if GPS on)">
+        </div>
+        <div class="input-row">
             <input list="s-list" id="destInput" placeholder="Where do you want to go?">
-            <datalist id="s-list">{% for s in stops %}<option value="{{s.stop_name}}" data-id="{{s.stop_id}}">{% endfor %}</datalist>
+            <button class="search-btn" onclick="swapStops()" title="Swap Start and Destination">↕</button>
+            <datalist id="s-list">{% for s in stops %}<option value="{{s.stop_name}}"></option>{% endfor %}</datalist>
             <button class="search-btn" onclick="triggerSearch()">Search</button>
         </div>
         <div id="results-list" style="max-height: 420px; overflow-y: auto;"></div>
@@ -58,6 +62,7 @@
     </div>
 
     <div id="map"></div>
+    <script id="stop-map-data" type="application/json">{{ stop_map | tojson | safe }}</script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="/static/script.js"></script>
 </body>
