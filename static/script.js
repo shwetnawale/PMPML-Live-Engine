@@ -1,98 +1,77 @@
-let map = L.map('map').setView([18.5204, 73.8567], 13);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+// Google Maps Silver Theme
+let map = L.map('map', {zoomControl: false}).setView([18.5204, 73.8567], 13);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
 
-const busIcon = L.icon({iconUrl: 'https://cdn-icons-png.flaticon.com/512/3448/3448339.png', iconSize:[35,35]});
-let routeLine, busMarker, userMarker, walkingLine, simInterval = null;
-let isManualMode = false;
+let uLat, uLon, uMarker, walkDots = [], busLine, simInterval = null;
 
-// --- 1. LOCATION LOGIC ---
-
-function toggleLocationMode() {
-    isManualMode = !isManualMode;
-    const btn = document.getElementById('locModeBtn');
-    if (isManualMode) {
-        btn.innerText = "🖱 Mode: Manual (Click Map)";
-        btn.style.background = "#fd7e14";
-        map.off('locationfound'); // Stop GPS auto-updates
-    } else {
-        btn.innerText = "📍 Mode: GPS";
-        btn.style.background = "#ffc107";
-        map.locate({setView: true, maxZoom: 15, enableHighAccuracy: true});
-    }
-}
-
-// Manual Click Trigger
-map.on('click', function(e) {
-    if (isManualMode) {
-        processUserLocation(e.latlng.lat, e.latlng.lng, "Test Point");
-    }
-});
-
-// GPS Trigger
+// GPS Location Tracking
+map.locate({setView: true, maxZoom: 15, enableHighAccuracy: true});
 map.on('locationfound', (e) => {
-    if (!isManualMode) {
-        processUserLocation(e.latlng.lat, e.latlng.lng, "Your Location");
-    }
+    uLat = e.latlng.lat; uLon = e.latlng.lng;
+    if(uMarker) map.removeLayer(uMarker);
+    uMarker = L.circleMarker(e.latlng, {radius: 7, color: '#1a73e8', fillColor: '#1a73e8', fillOpacity: 0.9}).addTo(map);
 });
 
-function processUserLocation(lat, lon, label) {
-    // Clear old user marker and walking line
-    if (userMarker) map.removeLayer(userMarker);
-    if (walkingLine) map.removeLayer(walkingLine);
+function triggerSearch() {
+    const endVal = document.getElementById('destInput').value;
+    const endId = document.querySelector(`#s-list option[value="${endVal}"]`)?.dataset.id;
+    if(!endId || !uLat) return alert("Please allow GPS access and select a destination.");
 
-    userMarker = L.circleMarker([lat, lon], {radius: 8, color: 'red', fillOpacity: 1}).addTo(map).bindPopup(label).openPopup();
-
-    fetch('/api/nearby', {
-        method:'POST', 
-        headers:{'Content-Type':'application/json'}, 
-        body:JSON.stringify({lat: lat, lon: lon})
-    })
+    fetch(`/api/plan?u_lat=${uLat}&u_lon=${uLon}&end_id=${endId}`)
     .then(res => res.json()).then(data => {
-        // Update Dashboard
-        document.getElementById('dash-title').innerText = data.stop_name;
-        document.getElementById('walk-dist').innerText = `🚶 Walk: ${data.distance} meters`;
-        document.getElementById('results').innerHTML = data.buses.map(b => 
-            `<div style="padding:5px; border-bottom:1px solid #eee">🚌 ${b.route_short_name}: <b>${b.arrival_time}</b></div>`
-        ).join('');
-        document.getElementById('dash').style.display = 'block';
-
-        // DRAW DOTTED WALKING ROUTE
-        walkingLine = L.polyline([[lat, lon], data.stop_coords], {
-            color: '#555',
-            weight: 3,
-            dashArray: '10, 10', // THIS MAKES IT DOTTED
-            opacity: 0.8
-        }).addTo(map);
+        const listPanel = document.getElementById('results-list');
+        listPanel.innerHTML = "";
+        
+        data.options.forEach(opt => {
+            const card = document.createElement('div');
+            card.className = "bus-card";
+            card.innerHTML = `
+                <div class="bus-left">
+                    <div class="bus-badge">${opt.bus_no}</div>
+                    <div>
+                        <div style="font-weight:bold; font-size:15px">${opt.departure}</div>
+                        <div style="font-size:12px; color:#5f6368">🚶 ${opt.walk_dist}m to ${opt.start_stop}</div>
+                    </div>
+                </div>
+                <div class="eta-label">${opt.eta} min</div>
+            `;
+            card.onclick = () => renderTrip(opt);
+            listPanel.appendChild(card);
+        });
+        if(data.options.length) renderTrip(data.options[0]);
     });
 }
 
-// --- 2. SIMULATION & TRACKING ---
+function renderTrip(opt) {
+    // Clear old route and walking dots
+    walkDots.forEach(d => map.removeLayer(d));
+    if(busLine) map.removeLayer(busLine);
+    walkDots = [];
 
-function toggleSim() {
-    const btn = document.getElementById('playBtn');
-    if (simInterval) { 
-        clearInterval(simInterval); simInterval = null; 
-        btn.innerText = "▶ Play"; btn.style.background = "#28a745";
-    } else {
-        btn.innerText = "⏹ Stop"; btn.style.background = "#dc3545";
+    // 1. Render Blue-Dot Walking Path (Circular Dots)
+    const dotCount = 14;
+    for(let i=0; i<=dotCount; i++) {
+        let lat = uLat + (opt.start_coords[0] - uLat) * (i/dotCount);
+        let lon = uLon + (opt.start_coords[1] - uLon) * (i/dotCount);
+        let circle = L.circle([lat, lon], {radius: 2, color: '#4285F4', fillColor: '#4285F4', fillOpacity: 0.8}).addTo(map);
+        walkDots.push(circle);
+    }
+
+    // 2. Render Bus Segment Polyline
+    busLine = L.polyline(opt.polyline, {color: '#1a73e8', weight: 5, opacity: 0.8}).addTo(map);
+    map.fitBounds(busLine.getBounds(), {padding: [120, 120]});
+}
+
+function toggleSimulation() {
+    const playBtn = document.getElementById('playBtn');
+    if (simInterval) { clearInterval(simInterval); simInterval = null; playBtn.innerText = "▶ Play Sim"; }
+    else {
+        playBtn.innerText = "⏹ Stop Sim";
         simInterval = setInterval(() => {
             fetch('/api/tick', {method: 'POST'}).then(res => res.json()).then(data => {
-                document.getElementById('clock-val').innerText = data.time;
-                if(document.getElementById('rSearch').value) updateBus();
+                document.getElementById('clock-display').innerText = data.time;
+                triggerSearch(); // Dynamically update ETAs every tick
             });
-        }, 1000);
+        }, 1000); // 1s real = 1m simulation
     }
 }
-
-function updateBus() {
-    let id = document.getElementById('rSearch').value;
-    fetch('/api/track/' + id).then(res => res.json()).then(data => {
-        if(routeLine) map.removeLayer(routeLine);
-        if(busMarker) map.removeLayer(busMarker);
-        routeLine = L.polyline(data.polyline, {color:'#007bff', weight:5}).addTo(map);
-        busMarker = L.marker(data.bus_loc, {icon:busIcon}).addTo(map).bindPopup(data.stop).openPopup();
-    });
-}
-
-// Initial GPS call
-map.locate({setView: true, maxZoom: 15, enableHighAccuracy: true});
