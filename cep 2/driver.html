@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Hub</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        brand: {
+                            50: '#f4f6fa',
+                            700: '#2f4858', // dark blue from image
+                            100: '#e1e7ed',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fa; }
+        .mobile-container {
+            max-width: 414px; margin: 0 auto; min-height: 100vh;
+            background-color: #f8fafc; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;
+            position: relative; overflow-x: hidden; padding-bottom: 80px;
+        }
+        .hide { display: none !important; }
+        #map { height: 180px; padding: 0; }
+        #route-map { height: 300px; padding: 0; }
+        .status-dot { width: 10px; height: 10px; background-color: #10b981; border-radius: 50%; display: inline-block; transition: background-color 0.3s; }
+        .status-dot.inactive { background-color: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.5); }
+        .status-dot.active { box-shadow: 0 0 8px rgba(16, 185, 129, 0.5); }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-gray-100 text-slate-800">
+    <div class="mobile-container bg-white flex flex-col h-screen">
+        <!-- HEADER -->
+        <header class="bg-white border-b border-slate-100 p-4 flex justify-between items-center z-10 shrink-0">
+            <div class="flex items-center gap-3">
+                <div class="bg-brand-700 text-white rounded-[10px] w-10 h-10 flex items-center justify-center shadow-sm">
+                    <i class="fa-solid fa-bus-simple text-lg"></i>
+                </div>
+                <h1 id="header-title" class="font-bold text-[17px] tracking-tight text-slate-800">Driver Hub</h1>
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="text-right">
+                    <div class="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-0.5">Driver ID</div>
+                    <div class="text-xs font-bold text-slate-800">#8842-DX</div>
+                </div>
+                <img src="https://ui-avatars.com/api/?name=John+Doe&background=2f4858&color=fff&rounded=true" alt="Avatar" class="w-10 h-10 rounded-full object-cover">
+            </div>
+        </header>
+
+        <!-- MAIN CONTENT -->
+        <main class="flex-1 p-5 space-y-5 bg-[#f4f7fa] overflow-y-auto">
+
+            <!-- SYSTEM STATUS (Top element kept across operational views natively) -->
+            <div id="system-status" class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex justify-between items-center transition-all hide-on-settings">
+                <div>
+                    <h2 class="text-[10px] font-bold tracking-widest text-[#8e9cae] uppercase mb-1.5">System Status</h2>
+                    <div class="flex items-center gap-2 font-bold text-emerald-500 text-[15px]" id="status-text-container">
+                        <span id="status-dot" class="status-dot inactive shadow-[0_0_8px_rgba(239,68,68,0.5)] bg-red-500"></span> 
+                        <span id="status-text" class="text-red-500">Tracking Inactive</span>
+                    </div>
+                </div>
+                <div class="bg-emerald-50 text-emerald-500 rounded-xl w-11 h-11 flex items-center justify-center shadow-sm" id="status-icon-container">
+                    <i class="fa-solid fa-tower-broadcast text-lg"></i>
+                </div>
+            </div>
+
+            <!-- VIEW: CONSOLE -->
+            <div id="view-console" class="space-y-5 animate-fade-in">
+                <!-- VEHICLE IDENTIFICATION -->
+                <div class="space-y-2">
+                    <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Vehicle Identification</h3>
+                    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-3.5 flex items-center gap-3">
+                        <div class="bg-slate-100 p-2 rounded-lg text-slate-500">
+                            <i class="fa-regular fa-id-card text-lg"></i>
+                        </div>
+                        <!-- Editable Bus ID -->
+                        <input type="text" id="bus-id-input" value="BUS-42-DOWNTOWN" class="font-bold text-slate-800 text-[15px] tracking-tight w-full bg-transparent border-none focus:outline-none focus:ring-0 uppercase placeholder-slate-400">
+                    </div>
+                </div>
+
+                <!-- CONTROLS -->
+                <div class="flex gap-4">
+                    <button id="btn-start" onclick="startTracking()" class="flex-1 bg-[#344d67] text-white rounded-xl py-4 flex flex-col items-center justify-center gap-2 shadow-sm hover:bg-[#2f4858] transition-colors">
+                        <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
+                            <i class="fa-solid fa-play text-sm"></i>
+                        </div>
+                        <span class="font-bold text-[11px] uppercase tracking-wider">Start Tracking</span>
+                    </button>
+                    <button id="btn-stop" onclick="stopTracking()" class="flex-1 bg-[#f1f5f9] text-[#64748b] rounded-xl py-4 flex flex-col items-center justify-center gap-2 shadow-sm hover:bg-[#e2e8f0] transition-colors opacity-50 cursor-not-allowed" disabled>
+                        <div class="w-8 h-8 rounded-full bg-slate-200 text-slate-400 flex items-center justify-center">
+                            <i class="fa-solid fa-stop text-sm"></i>
+                        </div>
+                        <span class="font-bold text-[11px] uppercase tracking-wider">Stop Tracking</span>
+                    </button>
+                </div>
+
+                <!-- LIVE GPS TELEMETRY BLOCK -->
+                <div class="border-[1.5px] border-dashed border-slate-300 bg-white rounded-xl p-4 shadow-sm relative overflow-hidden transition-opacity duration-300" id="telemetry-block" style="opacity: 0.5;">
+                    <h2 class="text-[10px] font-bold tracking-widest text-[#2f4858] mb-4 flex items-center gap-2 uppercase">
+                        <i class="fa-solid fa-location-dot"></i> Live GPS Telemetry
+                    </h2>
+                    
+                    <div class="space-y-0.5 mt-2">
+                        <div class="flex justify-between items-center py-2.5">
+                            <span class="text-[13px] font-medium text-slate-500">Latitude</span>
+                            <span id="lat-val" class="font-bold text-[14px] text-slate-800">--</span>
+                        </div>
+                        <div class="w-full h-px bg-slate-100"></div>
+                        <div class="flex justify-between items-center py-2.5">
+                            <span class="text-[13px] font-medium text-slate-500">Longitude</span>
+                            <span id="lng-val" class="font-bold text-[14px] text-slate-800">--</span>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 text-[10px] text-slate-400 font-medium flex items-center gap-1.5 pt-3 border-t border-dashed border-slate-200">
+                        <i class="fa-solid fa-clock-rotate-left"></i> Last updated: <span id="update-time" class="text-slate-500">Not started</span>
+                    </div>
+                </div>
+
+                <!-- MAP SECTION -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative">
+                    <div class="absolute bottom-3 left-3 z-[400] bg-white text-[11px] font-bold px-3 py-1.5 rounded-lg shadow-md border border-slate-100 text-slate-700">
+                        Current Location
+                    </div>
+                    <div id="map"></div>
+                </div>
+            </div>
+
+            <!-- VIEW: ROUTE -->
+            <div id="view-route" class="hide space-y-4 animate-fade-in">
+                <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Assigned Route</h3>
+                
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <div class="flex items-center gap-3 border-b border-slate-100 pb-3 mb-3">
+                        <div class="bg-indigo-50 text-indigo-600 w-10 h-10 rounded-lg flex items-center justify-center shrink-0">
+                            <i class="fa-solid fa-route text-sm"></i>
+                        </div>
+                        <div>
+                            <div class="font-bold text-[14px] text-slate-800 leading-tight">Route 42 - Sector A</div>
+                            <div class="text-[11px] text-slate-500 font-medium mt-0.5">Downtown to Akurdi</div>
+                        </div>
+                    </div>
+
+                    <!-- Stops Timeline -->
+                    <div class="space-y-4 pl-2 relative mt-4">
+                        <div class="absolute left-3.5 top-2 bottom-2 w-0.5 bg-slate-200"></div>
+                        
+                        <!-- Stop 1 -->
+                        <div class="flex gap-4 relative">
+                            <div class="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_0_4px_white] z-10 mt-1"></div>
+                            <div>
+                                <div class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Start</div>
+                                <div class="text-[13px] font-bold text-slate-800">Downtown Bus Station</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Stop 2 -->
+                        <div class="flex gap-4 relative">
+                            <div class="w-3 h-3 rounded-full bg-slate-300 shadow-[0_0_0_4px_white] z-10 mt-1"></div>
+                            <div>
+                                <div class="text-[10px] uppercase font-bold text-brand-700 tracking-wider">Next Stop</div>
+                                <div class="text-[13px] font-bold text-slate-800">Central Mall</div>
+                            </div>
+                        </div>
+
+                         <!-- Stop 3 -->
+                         <div class="flex gap-4 relative">
+                            <div class="w-3 h-3 rounded-full bg-slate-300 shadow-[0_0_0_4px_white] z-10 mt-1"></div>
+                            <div>
+                                <div class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">End</div>
+                                <div class="text-[13px] font-bold text-slate-800">Akurdi</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative mt-4">
+                    <div id="route-map"></div>
+                </div>
+            </div>
+
+            <!-- VIEW: MESSAGES -->
+            <div id="view-messages" class="hide space-y-4 animate-fade-in">
+                <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Notifications</h3>
+                
+                <div class="space-y-3">
+                    <!-- Message 1 -->
+                    <div class="bg-amber-50 rounded-xl border border-amber-200 p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <h4 class="font-bold text-[13px] text-amber-800 flex items-center gap-2">
+                                <i class="fa-solid fa-triangle-exclamation"></i> Traffic Alert
+                            </h4>
+                            <span class="text-[10px] text-amber-600 font-bold uppercase">10m ago</span>
+                        </div>
+                        <p class="text-[12px] text-amber-900 leading-relaxed font-medium">
+                            Heavy congestion reported near Central Mall intersection. Please expect a 10-minute delay and notify HQ if rerouting is required.
+                        </p>
+                    </div>
+
+                    <!-- Message 2 -->
+                    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <h4 class="font-bold text-[13px] text-slate-800 flex items-center gap-2">
+                                <i class="fa-solid fa-bullhorn text-brand-700"></i> Route Update
+                            </h4>
+                            <span class="text-[10px] text-slate-400 font-bold uppercase">2h ago</span>
+                        </div>
+                        <p class="text-[12px] text-slate-600 leading-relaxed">
+                            Stop #4 is temporarily out of service due to maintenance. Passengers should use Stop #5 for boarding.
+                        </p>
+                    </div>
+                    
+                    <!-- Message 3 -->
+                    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <h4 class="font-bold text-[13px] text-slate-800 flex items-center gap-2">
+                                <i class="fa-solid fa-circle-check text-emerald-600"></i> System Check
+                            </h4>
+                            <span class="text-[10px] text-slate-400 font-bold uppercase">1d ago</span>
+                        </div>
+                        <p class="text-[12px] text-slate-600 leading-relaxed">
+                            Vehicle diagnostics completed successfully. GPS module calibrated.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW: SETTINGS -->
+            <div id="view-settings" class="hide space-y-4 animate-fade-in">
+                <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Driver Profile</h3>
+                
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col items-center gap-3">
+                    <img src="https://ui-avatars.com/api/?name=John+Doe&background=2f4858&color=fff&rounded=true&size=120" alt="Avatar" class="w-24 h-24 rounded-full object-cover shadow-sm mb-2">
+                    <h2 class="text-xl font-bold tracking-tight text-slate-800">John Doe</h2>
+                    <div class="text-[12px] uppercase font-bold text-slate-400 tracking-wider">Active Driver</div>
+                </div>
+
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm divide-y divide-slate-100">
+                    <div class="p-4 flex justify-between items-center">
+                        <div class="flex items-center gap-3 text-slate-600">
+                            <i class="fa-regular fa-id-badge w-5 text-center"></i>
+                            <span class="text-[13px] font-bold">Driver ID</span>
+                        </div>
+                        <span class="text-[13px] font-bold text-slate-800">#8842-DX</span>
+                    </div>
+                    <div class="p-4 flex justify-between items-center">
+                        <div class="flex items-center gap-3 text-slate-600">
+                            <i class="fa-solid fa-phone w-5 text-center"></i>
+                            <span class="text-[13px] font-bold">Contact</span>
+                        </div>
+                        <span class="text-[13px] font-bold text-slate-800">+1 555-0192</span>
+                    </div>
+                    <div class="p-4 flex justify-between items-center">
+                        <div class="flex items-center gap-3 text-slate-600">
+                            <i class="fa-solid fa-bus w-5 text-center"></i>
+                            <span class="text-[13px] font-bold">Assigned Bus</span>
+                        </div>
+                        <span class="text-[13px] font-bold text-brand-700 bg-slate-100 px-2.5 py-1 rounded">Fleet-42</span>
+                    </div>
+                </div>
+
+                <div class="pt-4">
+                    <button class="w-full bg-red-50 text-red-600 rounded-[10px] py-[14px] font-bold text-[13px] flex items-center justify-center gap-2 transition-all hover:bg-red-100 uppercase tracking-wide">
+                        <i class="fa-solid fa-power-off"></i> LOGOUT DEVICE
+                    </button>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- BOTTOM NAV -->
+        <footer class="bg-white border-t border-slate-200 py-3 px-6 flex justify-between items-center shrink-0 w-full sticky bottom-0 z-50">
+            <button id="nav-console" onclick="showView('view-console', 'nav-console', 'Driver Hub')" class="nav-btn flex flex-col items-center gap-1.5 text-brand-700 transition">
+                <i class="fa-solid fa-border-all text-xl"></i>
+                <span class="text-[9px] font-bold tracking-wider">CONSOLE</span>
+            </button>
+            <button id="nav-route" onclick="showView('view-route', 'nav-route', 'Allocated Route')" class="nav-btn flex flex-col items-center gap-1.5 text-[#8e9cae] hover:text-brand-700 transition">
+                <i class="fa-solid fa-map text-xl"></i>
+                <span class="text-[9px] font-bold tracking-wider">ROUTE</span>
+            </button>
+            <button id="nav-messages" onclick="showView('view-messages', 'nav-messages', 'Announcements')" class="nav-btn flex flex-col items-center gap-1.5 text-[#8e9cae] hover:text-brand-700 transition">
+                <i class="fa-solid fa-comment text-xl"></i>
+                <span class="text-[9px] font-bold tracking-wider">MESSAGES</span>
+            </button>
+            <button id="nav-settings" onclick="showView('view-settings', 'nav-settings', 'Preferences')" class="nav-btn flex flex-col items-center gap-1.5 text-[#8e9cae] hover:text-brand-700 transition">
+                <i class="fa-solid fa-gear text-xl"></i>
+                <span class="text-[9px] font-bold tracking-wider">SETTINGS</span>
+            </button>
+        </footer>
+    </div>
+
+    <!-- Styles for map -->
+    <style>
+        .leaflet-control-container .leaflet-routing-container-hide { display: none; }
+        .leaflet-container { background: #e5e5f7; font-family: 'Inter', sans-serif; }
+    </style>
+
+    <script>
+        // State
+        let isTracking = false;
+        let trackingInterval = null;
+        let map = null;
+        let routeMap = null;
+        let driverMarker = null;
+        
+        let currentLat = 18.6298; // Route starting point matching passenger app expectation
+        let currentLng = 73.7997;
+
+        // View Navigation
+        function showView(viewId, navId, titleText) {
+            // Hide all views
+            ['view-console', 'view-route', 'view-messages', 'view-settings'].forEach(id => {
+                document.getElementById(id).classList.add('hide');
+            });
+            
+            // Show target view
+            document.getElementById(viewId).classList.remove('hide');
+
+            // Update Header title
+            if (titleText) {
+                document.getElementById('header-title').innerText = titleText;
+            }
+
+            // Deal with Settings hiding the top status bar
+            if (viewId === 'view-settings' || viewId === 'view-messages') {
+                document.getElementById('system-status').classList.add('hide');
+            } else {
+                document.getElementById('system-status').classList.remove('hide');
+            }
+
+            // Update Nav colors
+            if (navId) {
+                document.querySelectorAll('.nav-btn').forEach(btn => {
+                    btn.classList.remove('text-brand-700');
+                    btn.classList.add('text-[#8e9cae]');
+                });
+                document.getElementById(navId).classList.remove('text-[#8e9cae]');
+                document.getElementById(navId).classList.add('text-brand-700');
+            }
+
+            // Invalidate Map size if Route view
+            if (viewId === 'view-console') {
+                if (map) map.invalidateSize();
+            } else if (viewId === 'view-route') {
+                if (!routeMap) initRouteMap();
+                setTimeout(() => routeMap.invalidateSize(), 100);
+            }
+        }
+
+        // Initialize Map
+        function initMap(lat, lng) {
+            if (map) map.remove();
+
+            map = L.map('map', {zoomControl: false, dragging: false, scrollWheelZoom: false}).setView([lat, lng], 13);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap'
+            }).addTo(map);
+
+            const busDivIcon = L.divIcon({
+                className: 'custom-div-icon',
+                html: "<div style='background-color:#10b981;color:white;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3);'><i class='fa-solid fa-location-arrow text-[10px]'></i></div>",
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+
+            driverMarker = L.marker([lat, lng], {icon: busDivIcon}).addTo(map);
+        }
+
+        // Initialize Route Map
+        function initRouteMap() {
+            routeMap = L.map('route-map', {zoomControl: false}).setView([currentLat, currentLng], 14);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap'
+            }).addTo(routeMap);
+
+            // Mock route line
+            L.polyline([
+                [18.6298, 73.7997],
+                [18.6320, 73.8050],
+                [18.6400, 73.8100]
+            ], {color: '#344d67', weight: 4}).addTo(routeMap);
+
+            // Mock Stops
+            L.circleMarker([18.6298, 73.7997], {color: '#10b981', fillOpacity: 1, radius: 5}).addTo(routeMap).bindPopup("Downtown");
+            L.circleMarker([18.6320, 73.8050], {color: '#2f4858', fillOpacity: 1, radius: 5}).addTo(routeMap).bindPopup("Central Mall");
+            L.circleMarker([18.6400, 73.8100], {color: '#2f4858', fillOpacity: 1, radius: 5}).addTo(routeMap).bindPopup("Akurdi");
+        }
+
+        // Initialize with default location
+        initMap(currentLat, currentLng);
+
+        function startTracking() {
+            const busId = document.getElementById('bus-id-input').value.trim();
+            if (!busId) {
+                alert("Please enter a Bus ID.");
+                return;
+            }
+
+            isTracking = true;
+            updateUIState();
+
+            // Try to get real location, fallback to mock if denied/unavailable
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        currentLat = position.coords.latitude;
+                        currentLng = position.coords.longitude;
+                        sendLocationUpdate(busId);
+                        
+                        // Set interval to send updates every 5 seconds
+                        trackingInterval = setInterval(() => {
+                           // Mocking slight movement for demo purposes if real GPS doesn't change fast enough
+                           currentLat += ((Math.random() - 0.5) * 0.0001);
+                           currentLng += ((Math.random() - 0.5) * 0.0001);
+                           sendLocationUpdate(busId);
+                        }, 5000);
+                    },
+                    (error) => {
+                        console.warn("Geolocation denied or unavailable. Using simulated coordinates.", error);
+                        startMockTracking(busId);
+                    },
+                    { enableHighAccuracy: true }
+                );
+            } else {
+                startMockTracking(busId);
+            }
+        }
+
+        function startMockTracking(busId) {
+             sendLocationUpdate(busId);
+             trackingInterval = setInterval(() => {
+                 currentLat += ((Math.random() - 0.2) * 0.0005);
+                 currentLng += ((Math.random() - 0.5) * 0.0005);
+                 sendLocationUpdate(busId);
+             }, 5000);
+        }
+
+        function stopTracking() {
+            isTracking = false;
+            if (trackingInterval) {
+                clearInterval(trackingInterval);
+                trackingInterval = null;
+            }
+            updateUIState();
+        }
+
+        function sendLocationUpdate(busId) {
+            // Update map
+            if (map && driverMarker) {
+                driverMarker.setLatLng([currentLat, currentLng]);
+                map.panTo([currentLat, currentLng], {animate: true, duration: 1.0});
+            }
+
+            // Format coordinates
+            const latStr = Math.abs(currentLat).toFixed(4) + "° " + (currentLat >= 0 ? "N" : "S");
+            const lngStr = Math.abs(currentLng).toFixed(4) + "° " + (currentLng >= 0 ? "E" : "W");
+
+            // Update DOM telemetry
+            document.getElementById('lat-val').innerText = latStr;
+            document.getElementById('lng-val').innerText = lngStr;
+            document.getElementById('update-time').innerText = "Just now";
+
+            // Transmit API POST request
+            const payload = {
+                bus_id: busId,
+                latitude: currentLat,
+                longitude: currentLng,
+                timestamp: new Date().toISOString()
+            };
+
+            fetch('http://localhost:3000/api/bus-location', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).catch(err => console.error("Error sending location:", err));
+        }
+
+        function updateUIState() {
+            const btnStart = document.getElementById('btn-start');
+            const btnStop = document.getElementById('btn-stop');
+            const statusDot = document.getElementById('status-dot');
+            const statusText = document.getElementById('status-text');
+            const telemetryBlock = document.getElementById('telemetry-block');
+
+            if (isTracking) {
+                // Button states
+                btnStart.classList.add('opacity-50', 'cursor-not-allowed');
+                btnStart.disabled = true;
+                btnStop.classList.remove('opacity-50', 'cursor-not-allowed');
+                btnStop.disabled = false;
+                
+                // Status indicator
+                statusDot.className = 'status-dot active shadow-[0_0_8px_rgba(16,185,129,0.5)] bg-emerald-500';
+                statusText.className = 'text-emerald-500';
+                statusText.innerText = 'Tracking Active';
+
+                // Telemetry visibility
+                telemetryBlock.style.opacity = '1';
+                
+            } else {
+                 // Button states
+                 btnStart.classList.remove('opacity-50', 'cursor-not-allowed');
+                 btnStart.disabled = false;
+                 btnStop.classList.add('opacity-50', 'cursor-not-allowed');
+                 btnStop.disabled = true;
+                 
+                 // Status indicator
+                 statusDot.className = 'status-dot inactive shadow-[0_0_8px_rgba(239,68,68,0.5)] bg-red-500';
+                 statusText.className = 'text-red-500';
+                 statusText.innerText = 'Tracking Inactive';
+
+                 // Telemetry visibility
+                 telemetryBlock.style.opacity = '0.5';
+                 document.getElementById('update-time').innerText = "Stopped";
+            }
+        }
+    </script>
+</body>
+</html>

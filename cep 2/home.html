@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Passenger Hub</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Razorpay Checkout -->
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        brand: {
+                            50: '#f4f6fa',
+                            700: '#2f4858', // dark blue from image
+                            100: '#e1e7ed',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fa; }
+        .mobile-container {
+            max-width: 414px; margin: 0 auto; min-height: 100vh;
+            background-color: #f8fafc; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;
+            position: relative; overflow-x: hidden; padding-bottom: 80px;
+        }
+        .hide { display: none !important; }
+        #map { height: 230px; padding: 0; }
+        .status-dot { width: 10px; height: 10px; background-color: #10b981; border-radius: 50%; display: inline-block; }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        /* Custom Leaflet overrides */
+        .leaflet-control-container .leaflet-routing-container-hide { display: none; }
+        .leaflet-container { background: #e5e5f7; font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-100 text-slate-800">
+    <div class="mobile-container bg-white flex flex-col">
+        
+        <!-- HEADER (Hidden on Login) -->
+        <header id="main-header" class="bg-white border-b border-slate-100 p-4 flex justify-between items-center z-10 hide">
+            <div class="flex items-center gap-3">
+                <div class="bg-brand-700 text-white rounded-[10px] w-10 h-10 flex items-center justify-center shadow-sm">
+                    <i class="fa-solid fa-bus-simple text-lg"></i>
+                </div>
+                <h1 class="font-bold text-[17px] tracking-tight text-slate-800">Passenger Hub</h1>
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="text-right">
+                    <div class="text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-0.5">Passenger ID</div>
+                    <div id="passenger-id" class="text-xs font-bold text-slate-800">#8842-PX</div>
+                </div>
+                <img src="https://ui-avatars.com/api/?name=Pass+Enger&background=2f4858&color=fff&rounded=true" alt="Avatar" class="w-10 h-10 rounded-full object-cover">
+            </div>
+        </header>
+
+        <!-- MAIN CONTENT (padding) -->
+        <main class="flex-1 p-5 space-y-5 bg-[#f4f7fa] overflow-y-auto">
+
+            <!-- SYSTEM STATUS (Hidden on Login) -->
+            <div id="system-status" class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex justify-between items-center transition-all hide">
+                <div>
+                    <h2 class="text-[10px] font-bold tracking-widest text-[#8e9cae] uppercase mb-1.5">System Status</h2>
+                    <div class="flex items-center gap-2 font-bold text-emerald-500 text-[15px]">
+                        <span class="status-dot shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span> System Ready
+                    </div>
+                </div>
+                <div class="bg-emerald-50 text-emerald-500 rounded-xl w-11 h-11 flex items-center justify-center shadow-sm">
+                    <i class="fa-solid fa-tower-cell text-lg"></i>
+                </div>
+            </div>
+
+            <!-- VIEW 0: LOGIN -->
+            <div id="view-login" class="space-y-4 animate-fade-in flex flex-col justify-center h-full pt-10">
+                <div class="text-center mb-6">
+                    <div class="bg-brand-700 text-white rounded-[15px] w-16 h-16 flex items-center justify-center shadow-md mx-auto mb-4">
+                        <i class="fa-solid fa-bus-simple text-3xl"></i>
+                    </div>
+                    <h2 class="text-xl font-bold tracking-tight text-slate-800">Passenger Login</h2>
+                    <p class="text-xs text-slate-500 mt-1">Sign in to book and track public transport</p>
+                </div>
+                
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-3.5">
+                    <div class="relative">
+                        <i class="fa-regular fa-envelope absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+                        <input type="email" id="login-email" placeholder="Email Address" class="w-full bg-[#f8fafc] border border-slate-200 rounded-lg py-2.5 pl-[38px] pr-3 text-sm font-medium focus:outline-none focus:border-brand-700 focus:bg-white transition-colors" value="passenger@stitch.com">
+                    </div>
+                    <div class="relative">
+                        <i class="fa-solid fa-lock absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+                        <input type="password" id="login-password" placeholder="Password" class="w-full bg-[#f8fafc] border border-slate-200 rounded-lg py-2.5 pl-[38px] pr-3 text-sm font-medium focus:outline-none focus:border-brand-700 focus:bg-white transition-colors" value="password123">
+                    </div>
+                </div>
+
+                <button onclick="doLogin()" class="w-full bg-[#344d67] text-white rounded-[10px] py-[14px] font-bold text-[13px] flex items-center justify-center gap-2 shadow-md hover:bg-[#2f4858] transition-all mt-4 uppercase tracking-wide">
+                    LOGIN TO DASHBOARD <i class="fa-solid fa-arrow-right ml-1"></i>
+                </button>
+            </div>
+
+            <!-- VIEW 1: SEARCH -->
+            <div id="view-search" class="hide space-y-4 animate-fade-in">
+                <h3 class="text-[13px] font-bold tracking-tight text-slate-800 mb-2">Trip Search</h3>
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <div class="space-y-3.5">
+                        <div class="relative">
+                            <i class="fa-regular fa-circle-dot absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+                            <input type="text" id="input-from" placeholder="From (Bus Stop)" class="w-full bg-[#f8fafc] border border-slate-200 rounded-lg py-2.5 pl-[38px] pr-3 text-sm font-medium focus:outline-none focus:border-brand-700 focus:bg-white transition-colors" value="Downtown">
+                        </div>
+                        <div class="relative">
+                            <i class="fa-solid fa-location-dot absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+                            <input type="text" id="input-to" placeholder="To (Bus Stop)" class="w-full bg-[#f8fafc] border border-slate-200 rounded-lg py-2.5 pl-[38px] pr-3 text-sm font-medium focus:outline-none focus:border-brand-700 focus:bg-white transition-colors" value="Akurdi">
+                        </div>
+                    </div>
+                </div>
+
+                <button onclick="findBuses()" id="find-buses-btn" class="w-full bg-[#344d67] text-white rounded-[10px] py-[14px] font-bold text-[13px] flex items-center justify-center gap-2 shadow-md hover:opacity-90 transition-all mt-6 uppercase tracking-wide">
+                    <i class="fa-solid fa-magnifying-glass"></i> FIND BUSES
+                </button>
+            </div>
+
+            <!-- VIEW 2: RESULTS -->
+            <div id="view-results" class="hide space-y-4 animate-fade-in">
+                <div class="flex justify-between items-center">
+                     <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Available Buses</h3>
+                     <button onclick="goSearch()" class="text-[11px] font-bold text-[#8e9cae] hover:text-brand-700 transition uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-arrow-left"></i> Back</button>
+                </div>
+                
+                <div id="bus-list" class="space-y-3">
+                    <!-- Dynamic bus cards injected here -->
+                </div>
+            </div>
+
+            <!-- VIEW 3: LIVE TRACKING -->
+            <div id="view-tracking" class="hide space-y-4 animate-fade-in">
+                <div class="flex justify-between items-center">
+                     <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Vehicle Identification</h3>
+                     <button onclick="goResults()" class="text-[11px] font-bold text-[#8e9cae] hover:text-brand-700 transition uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-arrow-left"></i> Back</button>
+                </div>
+
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-3.5 flex items-center gap-3 justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="bg-slate-100 p-2 rounded-lg text-slate-500">
+                            <i class="fa-regular fa-id-card text-lg"></i>
+                        </div>
+                        <span id="track-bus-id" class="font-bold text-slate-800 text-[15px] tracking-tight">BUS-XX</span>
+                    </div>
+                    <!-- Direct Book button from tracking -->
+                    <button onclick="bookFromTracking()" class="bg-brand-700 text-white rounded px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider hover:bg-[#2f4858] transition-colors"><i class="fa-solid fa-ticket mr-1"></i> Book</button>
+                </div>
+
+                <!-- LIVE GPS TELEMETRY BLOCK -->
+                <div class="border-[1.5px] border-dashed border-slate-300 bg-white rounded-xl p-4 shadow-sm relative overflow-hidden">
+                    <h2 class="text-[10px] font-bold tracking-widest text-[#2f4858] mb-4 flex items-center gap-2 uppercase">
+                        <i class="fa-solid fa-location-dot"></i> Live GPS Telemetry
+                    </h2>
+                    
+                    <div class="space-y-0.5 mt-2">
+                        <div class="flex justify-between items-center py-2.5">
+                            <span class="text-[13px] font-medium text-slate-500">Latitude</span>
+                            <span id="lat-val" class="font-bold text-[14px] text-slate-800">--</span>
+                        </div>
+                        <div class="w-full h-px bg-slate-100"></div>
+                        <div class="flex justify-between items-center py-2.5">
+                            <span class="text-[13px] font-medium text-slate-500">Longitude</span>
+                            <span id="lng-val" class="font-bold text-[14px] text-slate-800">--</span>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-0.5 mt-3 pt-3 border-t border-slate-100">
+                        <div class="flex justify-between items-center py-2.5">
+                            <span class="text-[13px] font-medium text-slate-500">Next stop</span>
+                            <span id="next-stop-val" class="font-bold text-[14px] text-brand-700">--</span>
+                        </div>
+                        <div class="w-full h-px bg-slate-100"></div>
+                        <div class="flex justify-between items-center py-2.5">
+                            <span class="text-[13px] font-medium text-slate-500">ETA</span>
+                            <div class="bg-blue-50 text-blue-600 px-2.5 py-1 rounded font-bold text-[13px]" id="eta-val">--</div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 text-[10px] text-slate-400 font-medium flex items-center gap-1.5 pt-3 border-t border-dashed border-slate-200">
+                        <i class="fa-solid fa-clock-rotate-left"></i> Last updated: <span id="update-time" class="text-slate-500">Just now</span>
+                    </div>
+                </div>
+
+                <!-- MAP SECTION -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative">
+                    <div class="absolute bottom-3 left-3 z-[400] bg-white text-[11px] font-bold px-3 py-1.5 rounded-lg shadow-md border border-slate-100 text-slate-700" id="route-badge">
+                        Route --
+                    </div>
+                    <div id="map"></div>
+                </div>
+            </div>
+
+            <!-- VIEW 4: BOOKING -->
+            <div id="view-booking" class="hide space-y-4 animate-fade-in">
+                <div class="flex justify-between items-center">
+                     <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Book Ticket</h3>
+                     <button onclick="goResults()" class="text-[11px] font-bold text-[#8e9cae] hover:text-brand-700 transition uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-arrow-left"></i> Back</button>
+                </div>
+                
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-4">
+                    <div class="flex items-center gap-3 border-b border-slate-100 pb-3">
+                        <div class="bg-slate-100 text-brand-700 w-10 h-10 rounded-lg flex items-center justify-center shrink-0">
+                            <i class="fa-solid fa-bus-simple text-sm"></i>
+                        </div>
+                        <div>
+                            <div id="book-bus-id" class="font-bold text-[14px] text-slate-800 leading-tight">BUS-XX</div>
+                            <div id="book-bus-route" class="text-[11px] text-slate-500 font-medium mt-0.5">Route --</div>
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-4">
+                        <div class="flex-1">
+                            <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider block">From</label>
+                            <div id="book-from" class="text-[13px] font-bold text-slate-800 bg-[#f8fafc] border border-slate-200 rounded py-2 px-3 truncate">Downtown</div>
+                        </div>
+                        <div class="flex-1">
+                            <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider block">To</label>
+                            <div id="book-to" class="text-[13px] font-bold text-slate-800 bg-[#f8fafc] border border-slate-200 rounded py-2 px-3 truncate">Akurdi</div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider block">Passengers</label>
+                        <select id="book-passengers" onchange="calculateFare()" class="w-full bg-[#f8fafc] border border-slate-200 rounded py-2.5 px-3 text-sm font-bold text-slate-800 focus:outline-none focus:border-brand-700">
+                            <option value="1">1 Person</option>
+                            <option value="2">2 People</option>
+                            <option value="3">3 People</option>
+                            <option value="4">4 People</option>
+                        </select>
+                    </div>
+
+                    <div class="pt-3 border-t border-dashed border-slate-200 flex justify-between items-center">
+                        <span class="text-[13px] font-medium text-slate-500">Total Fare</span>
+                        <span id="book-fare" class="font-bold text-[18px] text-emerald-600">$2.50</span>
+                    </div>
+                </div>
+
+                <button onclick="goPayment()" class="w-full bg-[#344d67] text-white rounded-[10px] py-[14px] font-bold text-[13px] flex items-center justify-center gap-2 shadow-sm hover:opacity-90 transition-all uppercase tracking-wide">
+                    PROCEED TO PAYMENT <i class="fa-solid fa-arrow-right ml-1"></i>
+                </button>
+            </div>
+
+            <!-- VIEW 5: PAYMENT -->
+            <div id="view-payment" class="hide space-y-4 animate-fade-in">
+                <div class="flex justify-between items-center">
+                     <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Select Payment</h3>
+                     <button onclick="showView('view-booking')" class="text-[11px] font-bold text-[#8e9cae] hover:text-brand-700 transition uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-arrow-left"></i> Back</button>
+                </div>
+
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-2 space-y-1">
+                    <label class="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer transition">
+                        <input type="radio" name="payment_method" value="upi" class="w-4 h-4 text-brand-700 focus:ring-brand-700" checked>
+                        <div class="bg-blue-50 text-blue-600 w-8 h-8 rounded flex items-center justify-center shrink-0">
+                            <i class="fa-brands fa-google-pay text-lg"></i>
+                        </div>
+                        <span class="font-bold text-sm text-slate-800">UPI / GPay</span>
+                    </label>
+                    <label class="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer transition">
+                        <input type="radio" name="payment_method" value="card" class="w-4 h-4 text-brand-700 focus:ring-brand-700">
+                        <div class="bg-indigo-50 text-indigo-600 w-8 h-8 rounded flex items-center justify-center shrink-0">
+                            <i class="fa-regular fa-credit-card text-lg"></i>
+                        </div>
+                        <span class="font-bold text-sm text-slate-800">Credit / Debit Card</span>
+                    </label>
+                    <label class="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer transition">
+                        <input type="radio" name="payment_method" value="wallet" class="w-4 h-4 text-brand-700 focus:ring-brand-700">
+                        <div class="bg-emerald-50 text-emerald-600 w-8 h-8 rounded flex items-center justify-center shrink-0">
+                            <i class="fa-solid fa-wallet text-lg"></i>
+                        </div>
+                        <span class="font-bold text-sm text-slate-800">Wallet</span>
+                    </label>
+                </div>
+
+                <button id="btn-pay" onclick="processPayment()" class="w-full bg-[#10b981] text-white rounded-[10px] py-[14px] font-bold text-[13px] flex items-center justify-center gap-2 shadow-md hover:bg-emerald-600 transition-all uppercase tracking-wide">
+                    <i class="fa-solid fa-lock"></i> PAY <span id="pay-amount-btn">$2.50</span>
+                </button>
+            </div>
+
+            <!-- VIEW 6: MY TICKETS -->
+            <div id="view-tickets" class="hide space-y-4 animate-fade-in">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-[13px] font-bold tracking-tight text-slate-800">My Tickets</h3>
+                </div>
+                
+                <div id="tickets-list" class="space-y-3">
+                    <div class="text-center py-6 text-slate-400 text-sm font-medium">No tickets booked yet.</div>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- BOTTOM NAV (Hidden on Login) -->
+        <footer id="main-nav" class="absolute bottom-0 w-full bg-white border-t border-slate-200 py-3 px-6 flex justify-between items-center z-50 hide">
+            <button id="nav-search" class="nav-btn flex flex-col items-center gap-1.5 text-brand-700" onclick="goSearch()">
+                <i class="fa-solid fa-border-all text-xl"></i>
+                <span class="text-[9px] font-bold tracking-wider">CONSOLE</span>
+            </button>
+            <button id="nav-tickets" class="nav-btn flex flex-col items-center gap-1.5 text-[#8e9cae] hover:text-brand-700 transition" onclick="goTickets()">
+                <i class="fa-solid fa-ticket text-xl"></i>
+                <span class="text-[9px] font-bold tracking-wider">TICKETS</span>
+            </button>
+            <button class="nav-btn flex flex-col items-center gap-1.5 text-[#8e9cae] hover:text-brand-700 transition" onclick="logout()">
+                <i class="fa-solid fa-power-off text-xl"></i>
+                <span class="text-[9px] font-bold tracking-wider">LOGOUT</span>
+            </button>
+        </footer>
+    </div>
+
+    <script>
+        // DOM Elements
+        const mainHeader = document.getElementById('main-header');
+        const systemStatus = document.getElementById('system-status');
+        const mainNav = document.getElementById('main-nav');
+
+        const viewLogin = document.getElementById('view-login');
+        const viewSearch = document.getElementById('view-search');
+        const viewResults = document.getElementById('view-results');
+        const viewTracking = document.getElementById('view-tracking');
+        const viewBooking = document.getElementById('view-booking');
+        const viewPayment = document.getElementById('view-payment');
+        const viewTickets = document.getElementById('view-tickets');
+        
+        const busList = document.getElementById('bus-list');
+        const ticketsList = document.getElementById('tickets-list');
+
+        let liveInterval = null;
+        let map = null;
+        let busMarker = null;
+
+        // Mock State
+        let isLoggedIn = false;
+        let pName = "";
+        let pendingBooking = null;
+        let myTickets = [
+            // Example past ticket to show history
+            { ticket_id: "TKT-8291", bus_id: "BUS-11E", from: "Station", to: "Mall", passengers: 1, fare: "$1.50", status: "past", date: "Yesterday" }
+        ];
+
+        // Mock data satisfying prompt details
+        const mockBuses = [
+            { id: "BUS-42-DOWNTOWN", route: "Route 42 - Sector A", eta: "3 minutes", distance: "1.2 km", lat: 18.6298, lng: 73.7997, next_stop: "Akurdi", baseFare: 2.50 },
+            { id: "BUS-22D", route: "Route 45 - Express", eta: "8 minutes", distance: "3.5 km", lat: 18.6320, lng: 73.8050, next_stop: "Nigdi", baseFare: 3.50 }
+        ];
+
+        let currentActiveBus = null;
+
+        // Initialization
+        function checkAuth() {
+            if(!isLoggedIn) {
+                showView('view-login');
+                mainHeader.classList.add('hide');
+                systemStatus.classList.add('hide');
+                mainNav.classList.add('hide');
+            } else {
+                goSearch();
+            }
+        }
+
+        // Views Manager
+        function hideAllViews() {
+            viewLogin.classList.add('hide');
+            viewSearch.classList.add('hide');
+            viewResults.classList.add('hide');
+            viewTracking.classList.add('hide');
+            viewBooking.classList.add('hide');
+            viewPayment.classList.add('hide');
+            viewTickets.classList.add('hide');
+        }
+
+        function showView(viewId) {
+            hideAllViews();
+            document.getElementById(viewId).classList.remove('hide');
+        }
+
+        function updateNavColors(activeId) {
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('text-brand-700');
+                btn.classList.add('text-[#8e9cae]');
+            });
+            if(activeId) {
+                document.getElementById(activeId).classList.remove('text-[#8e9cae]');
+                document.getElementById(activeId).classList.add('text-brand-700');
+            }
+        }
+
+        // Functions
+        function doLogin() {
+            const emailStr = document.getElementById('login-email').value;
+            if(!emailStr) return;
+            isLoggedIn = true;
+            document.getElementById('passenger-id').innerText = emailStr.split('@')[0].toUpperCase();
+            
+            mainHeader.classList.remove('hide');
+            systemStatus.classList.remove('hide');
+            mainNav.classList.remove('hide');
+            goSearch();
+        }
+
+        function logout() {
+            isLoggedIn = false;
+            clearInterval(liveInterval);
+            checkAuth();
+        }
+
+        function goSearch() {
+            clearInterval(liveInterval);
+            updateNavColors('nav-search');
+            showView('view-search');
+        }
+
+        function goTickets() {
+            clearInterval(liveInterval);
+            updateNavColors('nav-tickets');
+            renderTickets();
+            showView('view-tickets');
+        }
+
+        function goResults() {
+            clearInterval(liveInterval);
+            updateNavColors('nav-search');
+            showView('view-results');
+        }
+
+        function findBuses() {
+            const btn = document.getElementById('find-buses-btn');
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> SEARCHING...';
+            
+            setTimeout(() => {
+                btn.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> FIND BUSES';
+                renderBusResults();
+                showView('view-results');
+            }, 600);
+        }
+
+        function renderBusResults() {
+            busList.innerHTML = '';
+            mockBuses.forEach(bus => {
+                const card = document.createElement('div');
+                card.className = 'bg-white rounded-xl border border-slate-200 shadow-sm p-4 animate-fade-in flex flex-col gap-3';
+                card.innerHTML = `
+                    <div class="flex justify-between items-center border-b border-slate-100 pb-3">
+                        <div class="flex items-center gap-3">
+                            <div class="bg-slate-100 text-brand-700 w-10 h-10 rounded-lg flex items-center justify-center shrink-0">
+                                <i class="fa-solid fa-bus-simple text-sm"></i>
+                            </div>
+                            <div>
+                                <div class="font-bold text-[14px] text-slate-800 leading-tight">\${bus.id}</div>
+                                <div class="text-[11px] text-slate-500 font-medium mt-0.5">\${bus.route}</div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                           <div class="text-[10px] uppercase font-bold text-slate-400 mb-0.5 tracking-wider">Distance</div>
+                           <div class="text-[13px] font-bold text-emerald-600">\${bus.distance}</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between pb-1 pt-1">
+                        <div class="text-[12px] font-medium text-slate-500">
+                            ETA <span class="text-blue-600 font-bold ml-1 bg-blue-50 px-1.5 py-0.5 rounded">\${bus.eta}</span>
+                        </div>
+                        <div class="text-[12px] font-medium text-slate-500">
+                            Next Stop <span class="font-bold text-slate-800 ml-1">\${bus.next_stop}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-2 mt-1">
+                        <button onclick="startTracking('\${bus.id}')" class="flex-1 bg-[#f1f5f9] hover:bg-[#e2e8f0] text-slate-600 font-bold rounded-[10px] py-3 text-[12px] tracking-wide transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+                            <i class="fa-solid fa-location-crosshairs"></i> TRACK
+                        </button>
+                        <button onclick="startBooking('\${bus.id}')" class="flex-1 bg-[#344d67] hover:bg-[#2f4858] text-white font-bold rounded-[10px] py-3 text-[12px] tracking-wide transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+                            <i class="fa-solid fa-ticket"></i> BOOK
+                        </button>
+                    </div>
+                `;
+                busList.appendChild(card);
+            });
+        }
+
+        // Live Tracking
+        function startTracking(busId) {
+            const bus = mockBuses.find(b => b.id === busId);
+            if (!bus) return;
+            currentActiveBus = JSON.parse(JSON.stringify(bus));
+
+            document.getElementById('track-bus-id').innerText = bus.id;
+            document.getElementById('route-badge').innerText = bus.route;
+            document.getElementById('next-stop-val').innerText = bus.next_stop;
+            document.getElementById('eta-val').innerText = bus.eta;
+            
+            showView('view-tracking');
+            updateNavColors(null);
+            initMap(currentActiveBus);
+
+            // Fetch live layout every 5 seconds
+            liveInterval = setInterval(updateLiveLocation, 5000);
+            updateLiveLocation(); // Immediately fetch once
+        }
+
+        function initMap(bus) {
+            const mapContainer = document.getElementById('map');
+            
+            if (map) {
+                map.remove();
+                mapContainer.innerHTML = '';
+            }
+
+            map = L.map('map', {zoomControl: false}).setView([bus.lat, bus.lng], 15);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap'
+            }).addTo(map);
+
+            const busDivIcon = L.divIcon({
+                className: 'custom-div-icon',
+                html: "<div style='background-color:#2f4858;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3);'><i class='fa-solid fa-bus text-[12px]'></i></div>",
+                iconSize: [28, 28],
+                iconAnchor: [14, 14]
+            });
+
+            busMarker = L.marker([bus.lat, bus.lng], {icon: busDivIcon}).addTo(map);
+            updateTelemetryUI(bus.lat, bus.lng);
+        }
+
+        function updateTelemetryUI(lat, lng) {
+            document.getElementById('lat-val').innerText = lat.toFixed(4) + "° N";
+            document.getElementById('lng-val').innerText = lng.toFixed(4) + "° E";
+            
+            const now = new Date();
+            document.getElementById('update-time').innerText = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+        }
+
+        async function updateLiveLocation() {
+            if(!currentActiveBus || !map || !busMarker) return;
+
+            try {
+                const response = await fetch(`http://localhost:3000/api/bus-location?bus_id=${currentActiveBus.id}`);
+                if (!response.ok) {
+                    console.log('Bus location not found yet on server.');
+                    return;
+                }
+
+                const data = await response.json();
+                
+                // Update active bus loc
+                currentActiveBus.lat = data.latitude;
+                currentActiveBus.lng = data.longitude;
+
+                busMarker.setLatLng([currentActiveBus.lat, currentActiveBus.lng]);
+                map.panTo([currentActiveBus.lat, currentActiveBus.lng], {animate: true, duration: 1.5});
+                
+                updateTelemetryUI(currentActiveBus.lat, currentActiveBus.lng);
+                
+                // ETA Mock Update for demo
+                if(Math.random() > 0.8) {
+                    const currMinutes = parseInt(currentActiveBus.eta);
+                    if(currMinutes > 1) {
+                        currentActiveBus.eta = (currMinutes - 1) + " minutes";
+                        document.getElementById('eta-val').innerText = currentActiveBus.eta;
+                    }
+                }
+            } catch (err) {
+                console.error("Error fetching live location:", err);
+            }
+        }
+
+        // Booking Flow
+        function bookFromTracking() {
+            if(currentActiveBus) {
+                startBooking(currentActiveBus.id);
+            }
+        }
+
+        function startBooking(busId) {
+            clearInterval(liveInterval);
+            const bus = mockBuses.find(b => b.id === busId);
+            if (!bus) return;
+
+            pendingBooking = {
+                bus_id: bus.id,
+                route: bus.route,
+                from: document.getElementById('input-from').value || "Downtown",
+                to: document.getElementById('input-to').value || "Akurdi",
+                baseFare: bus.baseFare,
+                passengers: 1,
+                totalFare: bus.baseFare
+            };
+
+            document.getElementById('book-bus-id').innerText = pendingBooking.bus_id;
+            document.getElementById('book-bus-route').innerText = pendingBooking.route;
+            document.getElementById('book-from').innerText = pendingBooking.from;
+            document.getElementById('book-to').innerText = pendingBooking.to;
+            document.getElementById('book-passengers').value = "1";
+            
+            calculateFare();
+            showView('view-booking');
+            updateNavColors(null);
+        }
+
+        function calculateFare() {
+            const count = parseInt(document.getElementById('book-passengers').value);
+            pendingBooking.passengers = count;
+            pendingBooking.totalFare = (pendingBooking.baseFare * count).toFixed(2);
+            document.getElementById('book-fare').innerText = `$${pendingBooking.totalFare}`;
+        }
+
+        function goPayment() {
+            document.getElementById('pay-amount-btn').innerText = `$${pendingBooking.totalFare}`;
+            showView('view-payment');
+        }
+
+        function processPayment() {
+            const btn = document.getElementById('btn-pay');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> PROCESSING...';
+            btn.disabled = true;
+
+            const totalInCents = Math.round(pendingBooking.totalFare * 100);
+
+            var options = {
+                "key": "rzp_test_Ym1XGvYlUlwHXX", // using a public placeholder testing key
+                "amount": totalInCents,
+                "currency": "USD", // Example
+                "name": "Stitch Transport",
+                "description": "Bus Ticket Booking",
+                "image": "https://ui-avatars.com/api/?name=ST&background=2f4858&color=fff",
+                "handler": function (response) {
+                    // Payment succeeded callback
+                    btn.innerHTML = '<i class="fa-solid fa-check"></i> PAID';
+                    btn.disabled = false;
+                    
+                    // Generate Digital Ticket
+                    const ticket = {
+                        ticket_id: "TKT-" + response.razorpay_payment_id.substring(4, 12).toUpperCase(), // Use part of payment ID as ticket ID
+                        bus_id: pendingBooking.bus_id,
+                        from: pendingBooking.from,
+                        to: pendingBooking.to,
+                        passengers: pendingBooking.passengers,
+                        fare: `$${pendingBooking.totalFare}`,
+                        status: "active",
+                        date: "Today"
+                    };
+                    
+                    myTickets.unshift(ticket);
+
+                    setTimeout(() => {
+                        btn.innerHTML = '<i class="fa-solid fa-lock"></i> PAY <span id="pay-amount-btn">--</span>';
+                        goTickets();
+                    }, 800);
+                },
+                "prefill": {
+                    "name": "Passenger",
+                    "email": document.getElementById('login-email').value || "passenger@stitch.com",
+                    "contact": "9999999999"
+                },
+                "theme": {
+                    "color": "#10b981"
+                },
+                "modal": {
+                    "ondismiss": function(){
+                        // Payment cancelled by user
+                        btn.innerHTML = originalText;
+                        btn.disabled = false;
+                    }
+                }
+            };
+            var rzp = new Razorpay(options);
+            rzp.on('payment.failed', function (response){
+                    alert("Payment Failed: " + response.error.description);
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+            });
+            rzp.open();
+        }
+
+        function renderTickets() {
+            ticketsList.innerHTML = '';
+            
+            if(myTickets.length === 0) {
+                ticketsList.innerHTML = '<div class="text-center py-6 text-slate-400 text-sm font-medium">No tickets booked yet.</div>';
+                return;
+            }
+
+            myTickets.forEach(tkt => {
+                const isActive = tkt.status === 'active';
+                const statusBadge = isActive ? 
+                    '<span class="bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">Active</span>' : 
+                    '<span class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">Completed</span>';
+
+                const card = document.createElement('div');
+                card.className = 'bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col gap-3 relative overflow-hidden';
+                if(isActive) card.classList.add('border-brand-100', 'shadow-[0_4px_12px_rgba(47,72,88,0.05)]');
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-center border-b border-slate-100 pb-2">
+                        <div class="font-bold text-[14px] text-slate-800">${tkt.ticket_id}</div>
+                        ${statusBadge}
+                    </div>
+                    
+                    <div class="flex gap-4 py-1">
+                        <div class="flex-1">
+                            <div class="text-[10px] uppercase font-bold text-slate-400 mb-0.5 tracking-wider">Bus</div>
+                            <div class="text-[12px] font-bold text-slate-800">${tkt.bus_id}</div>
+                        </div>
+                        <div class="flex-1">
+                            <div class="text-[10px] uppercase font-bold text-slate-400 mb-0.5 tracking-wider">Fare</div>
+                            <div class="text-[12px] font-bold text-slate-800">${tkt.fare}</div>
+                        </div>
+                        <div class="flex-1">
+                            <div class="text-[10px] uppercase font-bold text-slate-400 mb-0.5 tracking-wider">Pax</div>
+                            <div class="text-[12px] font-bold text-slate-800">${tkt.passengers}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-slate-50 rounded p-2 flex items-center justify-between mt-1">
+                        <div class="text-[12px] font-bold text-brand-700 truncate w-[40%]">${tkt.from}</div>
+                        <i class="fa-solid fa-arrow-right text-[10px] text-slate-400 mx-2"></i>
+                        <div class="text-[12px] font-bold text-brand-700 text-right truncate w-[40%]">${tkt.to}</div>
+                    </div>
+                    
+                    ${isActive ? `
+                        <button onclick="startTracking('${tkt.bus_id}')" class="w-full bg-[#f1f5f9] hover:bg-[#e2e8f0] text-slate-600 font-bold rounded-lg py-2.5 text-[11px] tracking-wide transition-colors flex items-center justify-center gap-1.5 mt-1 shadow-sm uppercase">
+                             <i class="fa-solid fa-location-crosshairs"></i> TRACK BUS
+                        </button>
+                    ` : ''}
+                `;
+                ticketsList.appendChild(card);
+            });
+        }
+
+        // Start
+        checkAuth();
+    </script>
+</body>
+</html>

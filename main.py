@@ -50,6 +50,12 @@ def load_gtfs():
         for col in ['route_id', 'stop_id', 'trip_id']:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
+
+    # Critical for route geometry/order: stop_sequence must be numeric, not text
+    if 'stop_sequence' in st.columns:
+        st['stop_sequence'] = pd.to_numeric(st['stop_sequence'], errors='coerce')
+        st = st.dropna(subset=['stop_sequence']).copy()
+        st['stop_sequence'] = st['stop_sequence'].astype(int)
     
     r['display'] = r['route_short_name'].astype(str) + " (" + r['route_long_name'] + ")"
     return r, s, t, st
@@ -65,9 +71,17 @@ STOP_TIMES_BY_TRIP = {
     str(trip_id): group.sort_values("stop_sequence").copy() for trip_id, group in STOP_TIMES.groupby("trip_id", sort=False)
 }
 STOPS_BY_ID = STOPS.drop_duplicates("stop_id").set_index("stop_id")
-STOP_ID_TO_NAME = STOPS_BY_ID["stop_name"].astype(str).to_dict()
+STOP_COORDS_BY_ID = STOPS_BY_ID[["stop_lat", "stop_lon"]].copy()
+STOP_COORDS_BY_ID["stop_lat"] = STOP_COORDS_BY_ID["stop_lat"].astype(float)
+STOP_COORDS_BY_ID["stop_lon"] = STOP_COORDS_BY_ID["stop_lon"].astype(float)
 TRIP_TO_ROUTE = TRIPS.drop_duplicates("trip_id").set_index("trip_id")["route_id"].astype(str).to_dict()
 ROUTE_TO_SHORT = ROUTES.drop_duplicates("route_id").set_index("route_id")["route_short_name"].astype(str).to_dict()
+
+MAX_RESULTS = 5
+MAX_START_TRIPS = 8
+MAX_TRANSFER_STOPS = 20
+MAX_TRANSFER_WAIT_SECONDS = 60 * 60
+MAX_TRANSFER_JUMP_KM = 0.5
 
 
 def parse_stop_ids(value: Optional[str]) -> list[str]:
@@ -81,18 +95,35 @@ def time_to_seconds(time_value: str) -> int:
     return hours * 3600 + minutes * 60 + seconds
 
 
+def align_to_reference(raw_seconds: int, reference_seconds: int) -> int:
+    aligned = int(raw_seconds)
+    while aligned < reference_seconds:
+        aligned += 24 * 3600
+    return aligned
+
+
+def build_polyline_from_segment(segment_df: pd.DataFrame) -> list[list[float]]:
+    if segment_df is None or segment_df.empty:
+        return []
+
+    ordered = segment_df.sort_values("stop_sequence")
+    points = []
+    for stop_id in ordered["stop_id"].astype(str).tolist():
+        if stop_id not in STOP_COORDS_BY_ID.index:
+            continue
+        coord = STOP_COORDS_BY_ID.loc[stop_id]
+        point = [float(coord["stop_lat"]), float(coord["stop_lon"])]
+        if not points or points[-1] != point:
+            points.append(point)
+    return points
+
+
 def seconds_to_hhmmss(total_seconds: int) -> str:
     total_seconds %= 24 * 3600
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
     seconds = total_seconds % 60
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
-
-def normalize_next_seconds(value_seconds: int, reference_seconds: int) -> int:
-    while value_seconds < reference_seconds:
-        value_seconds += 24 * 3600
-    return value_seconds
 
 
 def haversine_km_vectorized(lat1, lon1, lat2_series, lon2_series):
@@ -113,6 +144,17 @@ def home(request: Request):
         str(name): sorted(group["stop_id"].astype(str).tolist())
         for name, group in STOPS.groupby("stop_name", sort=False)
     }
+
+    # Station-name alias fix: merge Talegaon station variants to the same coordinate/id pool
+    talegaon_station_ids = sorted(
+        STOPS[
+            STOPS["stop_name"].isin(["Talegaon Station", "Talegaon Railway Station"])
+        ]["stop_id"].astype(str).tolist()
+    )
+    if talegaon_station_ids:
+        stop_map["Talegaon Station"] = talegaon_station_ids
+        stop_map["Talegaon Railway Station"] = talegaon_station_ids
+
     return templates.TemplateResponse("index.html", {
         "request": request, 
         "stops": stops_for_ui,
@@ -176,11 +218,11 @@ def plan_route(end_id: str, u_lat: Optional[float] = None, u_lon: Optional[float
         valid = merged[merged['stop_sequence_s'] < merged['stop_sequence_e']]
         
         if not valid.empty:
-            # FIX: Look for buses departing today, prioritizing next 3
+            # Look for next buses, including next-day rollover
             valid = valid.copy()
-            valid["dep_raw_seconds"] = valid["departure_time_s"].astype(str).map(time_to_seconds)
-            valid["dep_seconds"] = valid["dep_raw_seconds"].apply(lambda value: normalize_next_seconds(int(value), curr_seconds))
-            upcoming = valid.nsmallest(3, "dep_seconds")
+            valid["dep_seconds_raw"] = valid["departure_time_s"].astype(str).map(time_to_seconds)
+            valid["dep_seconds_effective"] = valid["dep_seconds_raw"].map(lambda x: align_to_reference(x, curr_seconds))
+            upcoming = valid.nsmallest(3, "dep_seconds_effective")
             
             for _, trip in upcoming.iterrows():
                 trip_id = str(trip['trip_id'])
@@ -188,22 +230,21 @@ def plan_route(end_id: str, u_lat: Optional[float] = None, u_lon: Optional[float
                 bus_no = ROUTE_TO_SHORT.get(route_id, "N/A")
                 
                 # ETA Logic
-                eta_minutes = max(0, int((int(trip["dep_seconds"]) - curr_seconds) / 60))
+                eta_minutes = max(0, int((int(trip["dep_seconds_effective"]) - curr_seconds) / 60))
                 
                 segment = STOP_TIMES_BY_TRIP.get(trip_id)
                 if segment is None or segment.empty:
                     continue
                 seg_mask = (segment['stop_sequence'] >= trip['stop_sequence_s']) & (segment['stop_sequence'] <= trip['stop_sequence_e'])
-                path = pd.merge(segment[seg_mask], STOPS, on='stop_id')
+                path_segment = segment[seg_mask]
+                polyline = build_polyline_from_segment(path_segment)
 
-                if path.empty:
+                if not polyline:
                     continue
-
-                polyline = path[["stop_lat", "stop_lon"]].astype(float).values.tolist()
 
                 all_options.append({
                     "bus_no": bus_no,
-                    "departure": seconds_to_hhmmss(int(trip["dep_raw_seconds"])),
+                    "departure": str(trip['departure_time_s']),
                     "eta": eta_minutes,
                     "start_stop": start_stop['stop_name'],
                     "walk_dist": round(start_stop['dist'] * 1000),
@@ -212,204 +253,113 @@ def plan_route(end_id: str, u_lat: Optional[float] = None, u_lon: Optional[float
                 })
 
     if all_options:
-        return {"options": sorted(all_options, key=lambda x: x['departure'])[:5]}
+        return {"options": sorted(all_options, key=lambda x: x['eta'])[:MAX_RESULTS]}
 
     transfer_options = []
-    seen_transfer_keys = set()
+    end_trips_small = end_trips[['trip_id', 'stop_sequence', 'arrival_time']].rename(
+        columns={'stop_sequence': 'stop_sequence_e', 'arrival_time': 'arrival_time_e'}
+    )
+
     for _, start_stop in near_stops.iterrows():
-        s_id = str(start_stop["stop_id"])
+        s_id = str(start_stop['stop_id'])
         start_trips = STOP_TIMES_BY_STOP.get(s_id)
         if start_trips is None or start_trips.empty:
             continue
 
-        first_leg = start_trips.copy()
-        first_leg["dep1_raw_seconds"] = first_leg["departure_time"].astype(str).map(time_to_seconds)
-        first_leg["dep1_seconds"] = first_leg["dep1_raw_seconds"].apply(lambda value: normalize_next_seconds(int(value), curr_seconds))
-        first_leg = first_leg.nsmallest(4, "dep1_seconds")
+        start_candidates = start_trips.copy()
+        start_candidates['dep_start_raw'] = start_candidates['departure_time'].astype(str).map(time_to_seconds)
+        start_candidates['dep_start_effective'] = start_candidates['dep_start_raw'].map(lambda x: align_to_reference(x, curr_seconds))
+        start_candidates = start_candidates.nsmallest(MAX_START_TRIPS, 'dep_start_effective')
 
-        for _, leg1 in first_leg.iterrows():
-            trip1_id = str(leg1["trip_id"])
+        for _, leg1 in start_candidates.iterrows():
+            trip1_id = str(leg1['trip_id'])
+            trip1_route = ROUTE_TO_SHORT.get(TRIP_TO_ROUTE.get(trip1_id), 'N/A')
+
             segment1 = STOP_TIMES_BY_TRIP.get(trip1_id)
             if segment1 is None or segment1.empty:
                 continue
 
-            transfer_points = segment1[segment1["stop_sequence"] > leg1["stop_sequence"]][
-                ["stop_id", "stop_sequence", "arrival_time"]
-            ].drop_duplicates(subset=["stop_id"]).head(18)
+            start_seq_1 = int(leg1['stop_sequence'])
+            dep1_eff = int(leg1['dep_start_effective'])
 
-            for _, tp in transfer_points.iterrows():
-                transfer_stop_id = str(tp["stop_id"])
-                transfer_arrival_raw = time_to_seconds(str(tp["arrival_time"]))
-                transfer_arrival_seconds = normalize_next_seconds(transfer_arrival_raw, int(leg1["dep1_seconds"]))
+            transfer_points = segment1[segment1['stop_sequence'] > start_seq_1].head(MAX_TRANSFER_STOPS)
+            for _, transfer_point in transfer_points.iterrows():
+                transfer_stop_id = str(transfer_point['stop_id'])
+                transfer_seq_1 = int(transfer_point['stop_sequence'])
+                arr1_raw = time_to_seconds(str(transfer_point['arrival_time']))
+                arr1_eff = align_to_reference(arr1_raw, dep1_eff)
 
                 transfer_trips = STOP_TIMES_BY_STOP.get(transfer_stop_id)
                 if transfer_trips is None or transfer_trips.empty:
                     continue
 
-                second_merge = pd.merge(transfer_trips, end_trips, on="trip_id", suffixes=("_x", "_e"))
-                second_valid = second_merge[second_merge["stop_sequence_x"] < second_merge["stop_sequence_e"]]
-                if second_valid.empty:
+                leg2_merge = pd.merge(transfer_trips, end_trips_small, on='trip_id', how='inner')
+                if leg2_merge.empty:
                     continue
 
-                second_valid = second_valid.copy()
-                second_valid["dep2_raw_seconds"] = second_valid["departure_time_x"].astype(str).map(time_to_seconds)
-                second_valid["dep2_seconds"] = second_valid["dep2_raw_seconds"].apply(
-                    lambda value: normalize_next_seconds(int(value), transfer_arrival_seconds)
-                )
-                if second_valid.empty:
+                leg2_merge = leg2_merge[
+                    (leg2_merge['stop_sequence'] < leg2_merge['stop_sequence_e']) &
+                    (leg2_merge['trip_id'] != trip1_id)
+                ]
+                if leg2_merge.empty:
                     continue
 
-                leg2 = second_valid.nsmallest(1, "dep2_seconds").iloc[0]
-                trip2_id = str(leg2["trip_id"])
-
-                if trip1_id == trip2_id:
+                leg2_merge = leg2_merge.copy()
+                leg2_merge['dep2_raw'] = leg2_merge['departure_time'].astype(str).map(time_to_seconds)
+                leg2_merge['dep2_eff'] = leg2_merge['dep2_raw'].map(lambda x: align_to_reference(x, arr1_eff))
+                leg2_merge['wait'] = leg2_merge['dep2_eff'] - arr1_eff
+                leg2_merge = leg2_merge[leg2_merge['wait'] <= MAX_TRANSFER_WAIT_SECONDS]
+                if leg2_merge.empty:
                     continue
 
-                key = (trip1_id, trip2_id, s_id, transfer_stop_id)
-                if key in seen_transfer_keys:
-                    continue
-                seen_transfer_keys.add(key)
-
-                route1 = TRIP_TO_ROUTE.get(trip1_id)
-                route2 = TRIP_TO_ROUTE.get(trip2_id)
-                bus1 = ROUTE_TO_SHORT.get(route1, "N/A")
-                bus2 = ROUTE_TO_SHORT.get(route2, "N/A")
+                leg2 = leg2_merge.nsmallest(1, 'dep2_eff').iloc[0]
+                trip2_id = str(leg2['trip_id'])
+                trip2_route = ROUTE_TO_SHORT.get(TRIP_TO_ROUTE.get(trip2_id), 'N/A')
 
                 segment2 = STOP_TIMES_BY_TRIP.get(trip2_id)
                 if segment2 is None or segment2.empty:
                     continue
 
-                leg1_mask = (segment1["stop_sequence"] >= leg1["stop_sequence"]) & (segment1["stop_sequence"] <= tp["stop_sequence"])
-                leg2_mask = (segment2["stop_sequence"] >= leg2["stop_sequence_x"]) & (segment2["stop_sequence"] <= leg2["stop_sequence_e"])
-                path1 = pd.merge(segment1[leg1_mask], STOPS, on="stop_id")
-                path2 = pd.merge(segment2[leg2_mask], STOPS, on="stop_id")
-                if path1.empty or path2.empty:
+                transfer_seq_2 = int(leg2['stop_sequence'])
+                end_seq_2 = int(leg2['stop_sequence_e'])
+                leg1_path_segment = segment1[(segment1['stop_sequence'] >= start_seq_1) & (segment1['stop_sequence'] <= transfer_seq_1)]
+                leg2_path_segment = segment2[(segment2['stop_sequence'] >= transfer_seq_2) & (segment2['stop_sequence'] <= end_seq_2)]
+                leg1_coords = build_polyline_from_segment(leg1_path_segment)
+                leg2_coords = build_polyline_from_segment(leg2_path_segment)
+
+                if not leg1_coords or not leg2_coords:
                     continue
 
-                polyline1 = path1[["stop_lat", "stop_lon"]].astype(float).values.tolist()
-                polyline2 = path2[["stop_lat", "stop_lon"]].astype(float).values.tolist()
-                polyline = polyline1 + polyline2[1:]
+                jump_km = calculate_distance(
+                    leg1_coords[-1][0],
+                    leg1_coords[-1][1],
+                    leg2_coords[0][0],
+                    leg2_coords[0][1],
+                )
+                if jump_km > MAX_TRANSFER_JUMP_KM:
+                    continue
 
+                if leg1_coords and leg2_coords and leg1_coords[-1] == leg2_coords[0]:
+                    polyline = leg1_coords + leg2_coords[1:]
+                else:
+                    polyline = leg1_coords + leg2_coords
+
+                eta_minutes = max(0, int((dep1_eff - curr_seconds) / 60))
                 transfer_options.append(
                     {
-                        "bus_no": f"{bus1} ➜ {bus2}",
-                        "departure": seconds_to_hhmmss(int(leg1["dep1_raw_seconds"])),
-                        "eta": max(0, int((int(leg1["dep1_seconds"]) - curr_seconds) / 60)),
-                        "start_stop": start_stop["stop_name"],
-                        "walk_dist": round(start_stop["dist"] * 1000),
-                        "start_coords": [float(start_stop["stop_lat"]), float(start_stop["stop_lon"])],
-                        "transfer_stop": STOP_ID_TO_NAME.get(transfer_stop_id, transfer_stop_id),
-                        "polyline": polyline,
+                        'bus_no': f"{trip1_route} → {trip2_route}",
+                        'departure': str(leg1['departure_time']),
+                        'eta': eta_minutes,
+                        'start_stop': start_stop['stop_name'],
+                        'walk_dist': round(start_stop['dist'] * 1000),
+                        'start_coords': [float(start_stop['stop_lat']), float(start_stop['stop_lon'])],
+                        'polyline': polyline,
+                        'is_transfer': True,
+                        'transfer_stop': transfer_stop_id,
                     }
                 )
 
-                if len(transfer_options) >= 5:
-                    break
+                if len(transfer_options) >= MAX_RESULTS:
+                    return {'options': sorted(transfer_options, key=lambda x: x['eta'])[:MAX_RESULTS]}
 
-            if len(transfer_options) >= 5:
-                break
-
-        if len(transfer_options) >= 5:
-            break
-
-    if transfer_options:
-        return {"options": sorted(transfer_options, key=lambda x: x['departure'])[:5]}
-
-    untimed_options = []
-    seen_untimed_keys = set()
-    end_id_set = set(end_ids)
-
-    for _, start_stop in near_stops.iterrows():
-        s_id = str(start_stop["stop_id"])
-        start_trips = STOP_TIMES_BY_STOP.get(s_id)
-        if start_trips is None or start_trips.empty:
-            continue
-
-        first_leg_rows = start_trips.sort_values("departure_time").head(10)
-        for _, leg1 in first_leg_rows.iterrows():
-            trip1_id = str(leg1["trip_id"])
-            segment1 = STOP_TIMES_BY_TRIP.get(trip1_id)
-            if segment1 is None or segment1.empty:
-                continue
-
-            transfer_points = segment1[segment1["stop_sequence"] > leg1["stop_sequence"]][["stop_id", "stop_sequence"]]
-            transfer_points = transfer_points.drop_duplicates(subset=["stop_id"]).head(12)
-
-            for _, tp in transfer_points.iterrows():
-                transfer_stop_id = str(tp["stop_id"])
-                transfer_trips = STOP_TIMES_BY_STOP.get(transfer_stop_id)
-                if transfer_trips is None or transfer_trips.empty:
-                    continue
-
-                for trip2_id in transfer_trips["trip_id"].astype(str).drop_duplicates().head(8):
-                    if trip2_id == trip1_id:
-                        continue
-
-                    segment2 = STOP_TIMES_BY_TRIP.get(trip2_id)
-                    if segment2 is None or segment2.empty:
-                        continue
-
-                    seq_transfer_rows = segment2[segment2["stop_id"] == transfer_stop_id]
-                    if seq_transfer_rows.empty:
-                        continue
-                    seq_transfer = seq_transfer_rows["stop_sequence"].min()
-
-                    end_rows = segment2[(segment2["stop_id"].isin(end_id_set)) & (segment2["stop_sequence"] > seq_transfer)]
-                    if end_rows.empty:
-                        continue
-
-                    key = (trip1_id, str(trip2_id), s_id, transfer_stop_id)
-                    if key in seen_untimed_keys:
-                        continue
-                    seen_untimed_keys.add(key)
-
-                    route1 = TRIP_TO_ROUTE.get(trip1_id)
-                    route2 = TRIP_TO_ROUTE.get(str(trip2_id))
-                    bus1 = ROUTE_TO_SHORT.get(route1, "N/A")
-                    bus2 = ROUTE_TO_SHORT.get(route2, "N/A")
-
-                    leg1_mask = (segment1["stop_sequence"] >= leg1["stop_sequence"]) & (segment1["stop_sequence"] <= tp["stop_sequence"])
-                    end_row = end_rows.nsmallest(1, "stop_sequence").iloc[0]
-                    leg2_mask = (segment2["stop_sequence"] >= seq_transfer) & (segment2["stop_sequence"] <= end_row["stop_sequence"])
-
-                    path1 = pd.merge(segment1[leg1_mask], STOPS, on="stop_id")
-                    path2 = pd.merge(segment2[leg2_mask], STOPS, on="stop_id")
-                    if path1.empty or path2.empty:
-                        continue
-
-                    polyline1 = path1[["stop_lat", "stop_lon"]].astype(float).values.tolist()
-                    polyline2 = path2[["stop_lat", "stop_lon"]].astype(float).values.tolist()
-                    polyline = polyline1 + polyline2[1:]
-
-                    dep1_raw = time_to_seconds(str(leg1["departure_time"]))
-                    dep1_norm = normalize_next_seconds(dep1_raw, curr_seconds)
-
-                    untimed_options.append(
-                        {
-                            "bus_no": f"{bus1} ➜ {bus2}",
-                            "departure": seconds_to_hhmmss(dep1_raw),
-                            "eta": max(0, int((dep1_norm - curr_seconds) / 60)),
-                            "start_stop": start_stop["stop_name"],
-                            "walk_dist": round(start_stop["dist"] * 1000),
-                            "start_coords": [float(start_stop["stop_lat"]), float(start_stop["stop_lon"])],
-                            "transfer_stop": STOP_ID_TO_NAME.get(transfer_stop_id, transfer_stop_id),
-                            "polyline": polyline,
-                        }
-                    )
-
-                    if len(untimed_options) >= 5:
-                        break
-
-                if len(untimed_options) >= 5:
-                    break
-
-            if len(untimed_options) >= 5:
-                break
-
-        if len(untimed_options) >= 5:
-            break
-
-    if untimed_options:
-        return {"options": sorted(untimed_options, key=lambda x: x['departure'])[:5]}
-
-    return {"options": []}
+    return {'options': sorted(transfer_options, key=lambda x: x['eta'])[:MAX_RESULTS]}
