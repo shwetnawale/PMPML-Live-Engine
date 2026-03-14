@@ -417,7 +417,8 @@
                     <div class="space-y-3">
                         <label class="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Enter Bus Number</label>
                         <div class="flex gap-2">
-                            <input type="text" id="track-bus-number-input" placeholder="e.g., 343C, 101, etc." class="flex-1 bg-[#f8fafc] border border-slate-200 rounded-lg py-2.5 px-3 text-sm font-medium focus:outline-none focus:border-brand-700 focus:bg-white transition-colors uppercase">
+                            <input type="text" id="track-bus-number-input" list="bus-number-list" placeholder="e.g., 343C, 101, etc." class="flex-1 bg-[#f8fafc] border border-slate-200 rounded-lg py-2.5 px-3 text-sm font-medium focus:outline-none focus:border-brand-700 focus:bg-white transition-colors uppercase">
+                            <datalist id="bus-number-list"></datalist>
                             <button onclick="trackBusByNumber()" id="track-bus-btn" class="bg-brand-700 hover:bg-brand-800 text-white rounded-lg px-6 py-2.5 text-[12px] font-bold transition-all uppercase">
                                 <i class="fa-solid fa-location-dot"></i> Track
                             </button>
@@ -504,6 +505,7 @@
         let isLoggedIn = false;
         let pendingBooking = null;
         let availableBuses = [];
+        let suggestedBusIds = [];
         let stopNames = [];
         let stopNameToIds = {};
         let stopNameLookupLower = {};
@@ -604,6 +606,26 @@
                 if (list) {
                     list.innerHTML = stopNames.map((name) => `<option value="${name}"></option>`).join('');
                     console.log('[DEBUG] Populated datalist with', stopNames.length, 'stops');
+                }
+
+                try {
+                    const busesResponse = await fetch(`${baseUrl}/api/bus-suggestions`, {
+                        mode: 'cors',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+
+                    if (busesResponse.ok) {
+                        const busesData = await busesResponse.json();
+                        suggestedBusIds = Array.isArray(busesData.bus_ids) ? busesData.bus_ids : [];
+                        const busList = document.getElementById('bus-number-list');
+                        if (busList) {
+                            busList.innerHTML = suggestedBusIds
+                                .map((busId) => `<option value="${String(busId).toUpperCase()}"></option>`)
+                                .join('');
+                        }
+                    }
+                } catch (busErr) {
+                    console.warn('[WARN] Bus suggestions unavailable:', busErr.message || busErr);
                 }
             } catch (err) {
                 console.error('[ERROR] Failed to load stops:', err);
@@ -1511,6 +1533,12 @@
                 console.log('[DEBUG] Tracking bus:', busNumber);
                 await loadStopsData();
                 
+                // Prefer live suggestion source from Mongo-backed endpoint
+                if (suggestedBusIds.length && !suggestedBusIds.includes(busNumber)) {
+                    alert(`Bus ${busNumber} not found in live Mongo suggestions`);
+                    return;
+                }
+
                 // Search for buses with this number
                 const allStopNames = Object.keys(stopNameToIds);
                 if (allStopNames.length === 0) {
