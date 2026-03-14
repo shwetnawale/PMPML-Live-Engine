@@ -465,8 +465,18 @@
     </div>
 
     <script>
-        const LIVE_ENGINE_ORIGIN = 'https://e7d9-2402-a00-1b2-11cf-252f-e8b4-a212-706f.ngrok-free.app';
-        const API_BASE = window.location.protocol === 'file:' ? LIVE_ENGINE_ORIGIN : window.location.origin;
+        const DEFAULT_ENGINE_ORIGIN = 'https://e7d9-2402-a00-1b2-11cf-252f-e8b4-a212-706f.ngrok-free.app';
+        const runtimeParams = new URLSearchParams(window.location.search);
+        const runtimeEngine = (runtimeParams.get('engine') || localStorage.getItem('CITYSAARTHI_ENGINE_URL') || '').trim().replace(/\/$/, '');
+        const LIVE_ENGINE_ORIGIN = runtimeEngine || DEFAULT_ENGINE_ORIGIN;
+        const isGithubPages = window.location.hostname.includes('github.io');
+        const API_BASE = (window.location.protocol === 'file:' || isGithubPages || Boolean(runtimeEngine))
+            ? LIVE_ENGINE_ORIGIN
+            : window.location.origin;
+
+        if (runtimeEngine) {
+            localStorage.setItem('CITYSAARTHI_ENGINE_URL', runtimeEngine);
+        }
 
         // DOM Elements
         const mainHeader = document.getElementById('main-header');
