@@ -35,8 +35,7 @@
     </main>
 
     <script>
-        const DEFAULT_ENGINE_URL = 'https://ca25-103-17-157-5.ngrok-free.app';
-        const BUS_TARGET = 'BUS-39';
+        const DEFAULT_ENGINE_URL = 'https://1977-103-17-157-5.ngrok-free.app';
 
         const input = document.getElementById('engine-url');
         const state = document.getElementById('conn-state');
@@ -62,7 +61,7 @@
 
             setState('Status: checking broker...', 'idle');
             try {
-                const response = await fetch(`${engine}/api/bus-location?bus_id=${encodeURIComponent(BUS_TARGET)}`);
+                const response = await fetch(`${engine}/health`);
                 if (!response.ok) throw new Error('offline');
                 setState('Status: broker connected', 'ok');
             } catch (_err) {
@@ -82,7 +81,9 @@
             window.location.href = `./cep%202/home.html?engine=${encodeURIComponent(engine)}`;
         });
 
-        checkBroker();
+        if (input.value) {
+            checkBroker();
+        }
     </script>
 </body>
 </html>
