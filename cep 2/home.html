@@ -150,7 +150,10 @@
                     <div class="space-y-3.5">
                         <div class="relative">
                             <i class="fa-regular fa-circle-dot absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
-                            <input type="text" id="input-from" list="stops-list" placeholder="From (Bus Stop)" class="w-full bg-[#f8fafc] border border-slate-200 rounded-lg py-2.5 pl-[38px] pr-3 text-sm font-medium focus:outline-none focus:border-brand-700 focus:bg-white transition-colors">
+                            <input type="text" id="input-from" list="stops-list" placeholder="From (Bus Stop)" class="w-full bg-[#f8fafc] border border-slate-200 rounded-lg py-2.5 pl-[38px] pr-10 text-sm font-medium focus:outline-none focus:border-brand-700 focus:bg-white transition-colors">
+                            <button onclick="autoDetectFromLocation()" type="button" title="Auto-detect my location" class="absolute right-2.5 top-2.5 text-slate-400 hover:text-brand-700 transition text-sm">
+                                <i class="fa-solid fa-location-crosshairs"></i>
+                            </button>
                         </div>
                         <div class="relative">
                             <i class="fa-solid fa-location-dot absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
@@ -160,20 +163,31 @@
                     </div>
                 </div>
 
-                <button onclick="findBuses()" id="find-buses-btn" class="w-full bg-[#344d67] text-white rounded-[10px] py-[14px] font-bold text-[13px] flex items-center justify-center gap-2 shadow-md hover:opacity-90 transition-all mt-6 uppercase tracking-wide">
+                <button onclick="findBuses()" id="find-buses-btn" class="w-full bg-[#344d67] text-white rounded-[10px] py-[14px] font-bold text-[13px] flex items-center justify-center gap-2 shadow-md hover:opacity-90 transition-all mt-4 uppercase tracking-wide">
                     <i class="fa-solid fa-magnifying-glass"></i> FIND BUSES
                 </button>
+
+                <!-- Auto-detect nearby buses section -->
+                <div class="border-t border-slate-200 pt-4 mt-4">
+                    <h4 class="text-[11px] font-bold tracking-wider text-slate-500 uppercase mb-3">Or discover nearby buses</h4>
+                    <button onclick="findNearbyBuses()" id="nearby-buses-btn" class="w-full bg-gradient-to-r from-blue-50 to-emerald-50 text-blue-600 border border-blue-200 rounded-[10px] py-[12px] font-bold text-[13px] flex items-center justify-center gap-2 shadow-sm hover:from-blue-100 hover:to-emerald-100 transition-all uppercase tracking-wide">
+                        <i class="fa-solid fa-location-dot"></i> FIND BUSES NEAR ME
+                    </button>
+                    <p class="text-[10px] text-slate-500 text-center mt-2">Uses your current location</p>
+                </div>
             </div>
 
             <!-- VIEW 2: RESULTS -->
             <div id="view-results" class="hide space-y-4 animate-fade-in">
                 <div class="flex justify-between items-center">
-                     <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Available Buses</h3>
+                     <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Available Routes</h3>
                      <button onclick="goSearch()" class="text-[11px] font-bold text-[#8e9cae] hover:text-brand-700 transition uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-arrow-left"></i> Back</button>
                 </div>
                 
+                <div id="route-map" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" style="height: 250px;"></div>
+                
                 <div id="bus-list" class="space-y-3">
-                    <!-- Dynamic bus cards injected here -->
+                    <!-- Dynamic route cards injected here -->
                 </div>
             </div>
 
@@ -289,7 +303,7 @@
 
                     <div class="pt-3 border-t border-dashed border-slate-200 flex justify-between items-center">
                         <span class="text-[13px] font-medium text-slate-500">Total Fare</span>
-                        <span id="book-fare" class="font-bold text-[18px] text-emerald-600">$2.50</span>
+                        <span id="book-fare" class="font-bold text-[18px] text-emerald-600">₹20</span>
                     </div>
                 </div>
 
@@ -330,8 +344,32 @@
                 </div>
 
                 <button id="btn-pay" onclick="processPayment()" class="w-full bg-[#10b981] text-white rounded-[10px] py-[14px] font-bold text-[13px] flex items-center justify-center gap-2 shadow-md hover:bg-emerald-600 transition-all uppercase tracking-wide">
-                    <i class="fa-solid fa-lock"></i> PAY <span id="pay-amount-btn">$2.50</span>
+                    <i class="fa-solid fa-lock"></i> PAY <span id="pay-amount-btn">₹20</span>
                 </button>
+            </div>
+
+            <!-- VIEW 5B: TRACK BUS BY NUMBER -->
+            <div id="view-track-by-number" class="hide space-y-4 animate-fade-in">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Track Bus</h3>
+                    <button onclick="goSearch()" class="text-[11px] font-bold text-[#8e9cae] hover:text-brand-700 transition uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-arrow-left"></i> Back</button>
+                </div>
+
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <div class="space-y-3">
+                        <label class="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Enter Bus Number</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="track-bus-number-input" placeholder="e.g., 343C, 101, etc." class="flex-1 bg-[#f8fafc] border border-slate-200 rounded-lg py-2.5 px-3 text-sm font-medium focus:outline-none focus:border-brand-700 focus:bg-white transition-colors uppercase">
+                            <button onclick="trackBusByNumber()" id="track-bus-btn" class="bg-brand-700 hover:bg-brand-800 text-white rounded-lg px-6 py-2.5 text-[12px] font-bold transition-all uppercase">
+                                <i class="fa-solid fa-location-dot"></i> Track
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tracked-bus-info" class="hidden space-y-4">
+                    <!-- Bus info will be injected here -->
+                </div>
             </div>
 
             <!-- VIEW 6: MY TICKETS -->
@@ -348,14 +386,18 @@
         </main>
 
         <!-- BOTTOM NAV (Hidden on Login) -->
-        <footer id="main-nav" class="absolute bottom-0 w-full bg-white border-t border-slate-200 py-3 px-6 flex justify-between items-center z-50 hide">
+        <footer id="main-nav" class="absolute bottom-0 w-full bg-white border-t border-slate-200 py-3 px-6 flex justify-around items-center z-50 hide">
             <button id="nav-search" class="nav-btn flex flex-col items-center gap-1.5 text-brand-700" onclick="goSearch()">
-                <i class="fa-solid fa-border-all text-xl"></i>
-                <span class="text-[9px] font-bold tracking-wider">CONSOLE</span>
+                <i class="fa-solid fa-magnifying-glass text-xl"></i>
+                <span class="text-[9px] font-bold tracking-wider">SEARCH</span>
             </button>
             <button id="nav-tickets" class="nav-btn flex flex-col items-center gap-1.5 text-[#8e9cae] hover:text-brand-700 transition" onclick="goTickets()">
                 <i class="fa-solid fa-ticket text-xl"></i>
                 <span class="text-[9px] font-bold tracking-wider">TICKETS</span>
+            </button>
+            <button id="nav-track" class="nav-btn flex flex-col items-center gap-1.5 text-[#8e9cae] hover:text-brand-700 transition" onclick="goTrack()">
+                <i class="fa-solid fa-location-crosshairs text-xl"></i>
+                <span class="text-[9px] font-bold tracking-wider">TRACK</span>
             </button>
             <button class="nav-btn flex flex-col items-center gap-1.5 text-[#8e9cae] hover:text-brand-700 transition" onclick="logout()">
                 <i class="fa-solid fa-power-off text-xl"></i>
@@ -396,7 +438,7 @@
         let stopNameLookupLower = {};
         let myTickets = [
             // Example past ticket to show history
-            { ticket_id: "TKT-8291", bus_id: "BUS-11E", from: "Station", to: "Mall", passengers: 1, fare: "$1.50", status: "past", date: "Yesterday" }
+            { ticket_id: "TKT-8291", bus_id: "BUS-11E", from: "Station", to: "Mall", passengers: 1, fare: "₹120", status: "past", date: "Yesterday" }
         ];
 
         let currentActiveBus = null;
@@ -448,20 +490,42 @@
         async function loadStopsData() {
             if (stopNames.length > 0) return;
 
-            const response = await fetch('/api/stops');
-            if (!response.ok) throw new Error('Unable to load stops');
+            try {
+                const baseUrl = window.location.protocol === 'file:' ? 'http://127.0.0.1:8010' : '';
+                console.log('[DEBUG] Base URL:', baseUrl);
+                console.log('[DEBUG] Fetching stops from API...');
+                
+                const response = await fetch(`${baseUrl}/api/stops`, {
+                    mode: 'cors',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                console.log('[DEBUG] Stops API Response status:', response.status);
+                
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status} ${response.statusText}`);
+                }
 
-            const data = await response.json();
-            stopNames = data.stop_names || [];
-            stopNameToIds = data.stop_name_to_ids || {};
-            stopNameLookupLower = {};
-            Object.keys(stopNameToIds).forEach((name) => {
-                stopNameLookupLower[name.toLowerCase()] = stopNameToIds[name];
-            });
+                const data = await response.json();
+                console.log('[DEBUG] Stops data received:', Object.keys(data));
+                
+                stopNames = data.stop_names || [];
+                stopNameToIds = data.stop_name_to_ids || {};
+                
+                console.log('[DEBUG] Loaded', stopNames.length, 'unique stop names');
+                
+                stopNameLookupLower = {};
+                Object.keys(stopNameToIds).forEach((name) => {
+                    stopNameLookupLower[name.toLowerCase()] = stopNameToIds[name];
+                });
 
-            const list = document.getElementById('stops-list');
-            if (list) {
-                list.innerHTML = stopNames.map((name) => `<option value="${name}"></option>`).join('');
+                const list = document.getElementById('stops-list');
+                if (list) {
+                    list.innerHTML = stopNames.map((name) => `<option value="${name}"></option>`).join('');
+                    console.log('[DEBUG] Populated datalist with', stopNames.length, 'stops');
+                }
+            } catch (err) {
+                console.error('[ERROR] Failed to load stops:', err);
+                throw err;
             }
         }
 
@@ -569,12 +633,17 @@
             showView('view-results');
         }
 
+        function goTrack() {
+            goTrackByNumber();
+        }
+
         async function findBuses() {
             const btn = document.getElementById('find-buses-btn');
             btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> SEARCHING...';
             btn.disabled = true;
 
             try {
+                console.log('[DEBUG] Starting bus search...');
                 await loadStopsData();
 
                 const fromInput = document.getElementById('input-from');
@@ -582,7 +651,11 @@
                 const fromName = (fromInput.value || '').trim();
                 const toName = (toInput.value || '').trim();
 
+                console.log('[DEBUG] From:', fromName, '| To:', toName);
+
                 const endIds = getStopIdsByName(toName);
+                console.log('[DEBUG] End stop IDs:', endIds);
+                
                 if (!endIds || endIds.length === 0) {
                     alert('Please select a valid destination from dropdown suggestions.');
                     return;
@@ -607,7 +680,7 @@
                     params.set('u_lat', geo.lat);
                     params.set('u_lon', geo.lon);
 
-                    const nearestRes = await fetch(`/api/nearest-stop?lat=${geo.lat}&lon=${geo.lon}`);
+                    const nearestRes = await fetch(`http://127.0.0.1:8010/api/nearest-stop?lat=${geo.lat}&lon=${geo.lon}`);
                     if (nearestRes.ok) {
                         const nearestData = await nearestRes.json();
                         if (nearestData.stop_name) {
@@ -616,17 +689,19 @@
                     }
                 }
 
-                const response = await fetch(`/api/plan?${params.toString()}`);
+                const response = await fetch(`http://127.0.0.1:8010/api/plan?${params.toString()}`);
                 if (!response.ok) {
                     throw new Error('Failed to fetch bus options');
                 }
 
                 const data = await response.json();
-                availableBuses = (data.options || []).map((opt, index) => {
+                availableBuses = (data.options || []).slice(0, 5).map((opt, index) => {
                     const polyline = Array.isArray(opt.polyline) ? opt.polyline : [];
                     const firstPoint = polyline[0] || opt.start_coords || [18.5204, 73.8567];
                     const etaMin = Number(opt.eta || 0);
                     const departure = String(opt.departure || '--:--:--');
+                    const stops = Array.isArray(opt.stops) ? opt.stops : [];
+                    
                     return {
                         id: `${String(opt.bus_no || 'BUS')}-${index}`,
                         liveBusId: String(opt.bus_no || `BUS-${index + 1}`),
@@ -636,22 +711,222 @@
                         lat: Number(firstPoint[0]),
                         lng: Number(firstPoint[1]),
                         next_stop: toName || 'Destination',
-                        baseFare: Math.max(2.5, Number((2.5 + etaMin * 0.05).toFixed(2))),
+                        baseFare: Math.max(20, Number((20 + etaMin * 2.5).toFixed(0))),
                         polyline,
                         departure,
                         start_stop: String(opt.start_stop || fromInput.value || 'Nearby stop'),
+                        stops: stops,
                     };
                 });
 
                 renderBusResults();
+                initRouteMap();
+                console.log('[DEBUG] Showing results view with', availableBuses.length, 'buses');
                 showView('view-results');
             } catch (err) {
-                console.error(err);
-                alert('Unable to fetch buses right now. Please try again.');
+                console.error('[ERROR] Bus search failed:', err.message);
+                console.error('[ERROR] Full error:', err);
+                alert(`Unable to fetch buses: ${err.message}`);
             } finally {
                 btn.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> FIND BUSES';
                 btn.disabled = false;
             }
+        }
+
+        async function autoDetectFromLocation() {
+            const fromInput = document.getElementById('input-from');
+            const btn = event.target.closest('button');
+            
+            try {
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+                btn.disabled = true;
+                
+                const geo = await getUserPosition();
+                if (!geo) {
+                    alert('Please enable location access');
+                    return;
+                }
+                
+                const nearestRes = await fetch(`http://127.0.0.1:8010/api/nearest-stop?lat=${geo.lat}&lon=${geo.lon}`);
+                if (!nearestRes.ok) throw new Error('Could not find nearby stop');
+                
+                const nearestData = await nearestRes.json();
+                if (nearestData.stop_name) {
+                    fromInput.value = nearestData.stop_name;
+                    fromInput.classList.add('bg-blue-50');
+                    setTimeout(() => fromInput.classList.remove('bg-blue-50'), 1500);
+                    console.log('[DEBUG] Auto-detected from location:', nearestData.stop_name);
+                }
+            } catch (err) {
+                console.error('[ERROR] Auto-detect failed:', err);
+                alert('Could not detect your location');
+            } finally {
+                btn.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i>';
+                btn.disabled = false;
+            }
+        }
+
+        async function findNearbyBuses() {
+            const btn = document.getElementById('nearby-buses-btn');
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> SEARCHING...';
+            btn.disabled = true;
+
+            try {
+                console.log('[DEBUG] Finding buses near current location...');
+                await loadStopsData();
+                
+                const geo = await getUserPosition();
+                if (!geo) {
+                    alert('Please enable location access to find nearby buses');
+                    return;
+                }
+                
+                console.log('[DEBUG] User location:', geo.lat, geo.lon);
+                
+                // Get nearest stop from user
+                const nearestRes = await fetch(`http://127.0.0.1:8010/api/nearest-stop?lat=${geo.lat}&lon=${geo.lon}`);
+                if (!nearestRes.ok) throw new Error('Could not find nearby stops');
+                
+                const nearestData = await nearestRes.json();
+                console.log('[DEBUG] Nearest stop:', nearestData.stop_name);
+                
+                // Get all available destinations randomly or from a default list
+                const allStopNames = Object.keys(stopNameToIds);
+                if (allStopNames.length === 0) {
+                    alert('No destinations available');
+                    return;
+                }
+                
+                // Randomly select 3-5 destination stops
+                const destinationCount = Math.min(5, allStopNames.length);
+                const selectedDestinations = [];
+                for (let i = 0; i < destinationCount; i++) {
+                    const randomIdx = Math.floor(Math.random() * allStopNames.length);
+                    const destName = allStopNames[randomIdx];
+                    if (destName !== nearestData.stop_name && !selectedDestinations.includes(destName)) {
+                        selectedDestinations.push(destName);
+                    }
+                }
+                
+                // Fetch buses to all selected destinations from user's location
+                const endIds = selectedDestinations
+                    .map(name => stopNameToIds[name])
+                    .flat()
+                    .slice(0, 5)
+                    .join(',');
+                
+                const params = new URLSearchParams({ end_id: endIds, u_lat: geo.lat, u_lon: geo.lon });
+                
+                const response = await fetch(`http://127.0.0.1:8010/api/plan?${params.toString()}`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch nearby buses');
+                }
+
+                const data = await response.json();
+                
+                if (!data.options || data.options.length === 0) {
+                    alert('No buses found near your location. Try specifying a destination.');
+                    return;
+                }
+                
+                console.log('[DEBUG] Found', data.options.length, 'nearby buses');
+                
+                availableBuses = (data.options || []).slice(0, 5).map((opt, index) => {
+                    const polyline = Array.isArray(opt.polyline) ? opt.polyline : [];
+                    const firstPoint = polyline[0] || opt.start_coords || [18.5204, 73.8567];
+                    const etaMin = Number(opt.eta || 0);
+                    const departure = String(opt.departure || '--:--:--');
+                    const stops = Array.isArray(opt.stops) ? opt.stops : [];
+                    
+                    return {
+                        id: `${String(opt.bus_no || 'BUS')}-${index}`,
+                        liveBusId: String(opt.bus_no || `BUS-${index + 1}`),
+                        route: opt.is_transfer ? `Transfer route (${departure})` : `Direct route (${departure})`,
+                        eta: `${etaMin} min`,
+                        distance: `${Number(opt.walk_dist || 0)} m walk`,
+                        lat: Number(firstPoint[0]),
+                        lng: Number(firstPoint[1]),
+                        next_stop: selectedDestinations[0] || 'Destination',
+                        baseFare: Math.max(20, Number((20 + etaMin * 2.5).toFixed(0))),
+                        polyline,
+                        departure,
+                        start_stop: nearestData.stop_name || 'Your Location',
+                        stops: stops,
+                    };
+                });
+
+                console.log('[DEBUG] Showing', availableBuses.length, 'buses');
+                renderBusResults();
+                initRouteMap();
+                document.getElementById('input-from').value = nearestData.stop_name;
+                document.getElementById('input-to').value = selectedDestinations[0] || '';
+                showView('view-results');
+                
+            } catch (err) {
+                console.error('[ERROR] Nearby bus search failed:', err.message);
+                alert(`Could not find nearby buses: ${err.message}`);
+            } finally {
+                btn.innerHTML = '<i class="fa-solid fa-location-dot"></i> FIND BUSES NEAR ME';
+                btn.disabled = false;
+            }
+        }
+
+        let routeMapInstance = null;
+
+        function initRouteMap() {
+            const mapContainer = document.getElementById('route-map');
+            if (!mapContainer) return;
+
+            // Wait for DOM to settle then initialize
+            setTimeout(() => {
+                if (routeMapInstance) {
+                    routeMapInstance.remove();
+                }
+
+                routeMapInstance = L.map('route-map', { zoomControl: false }).setView([18.5204, 73.8567], 12);
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                    attribution: '&copy; OpenStreetMap'
+                }).addTo(routeMapInstance);
+
+                const polylines = [];
+                const bounds = L.latLngBounds();
+                
+                availableBuses.forEach((bus, idx) => {
+                    if (Array.isArray(bus.polyline) && bus.polyline.length > 1) {
+                        const color = ['#344d67', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][idx % 5];
+                        const line = L.polyline(bus.polyline, { color, weight: 3, opacity: 0.7 }).addTo(routeMapInstance);
+                        polylines.push(line);
+                        
+                        // Add bounds for all points
+                        bus.polyline.forEach(point => {
+                            bounds.extend([point[0], point[1]]);
+                        });
+                    }
+                });
+
+                // Add start and end markers
+                if (availableBuses.length > 0) {
+                    const firstBus = availableBuses[0];
+                    if (firstBus.lat && firstBus.lng) {
+                        L.circleMarker([firstBus.lat, firstBus.lng], {
+                            radius: 6,
+                            fillColor: '#2f4858',
+                            color: '#fff',
+                            weight: 2,
+                            opacity: 1,
+                            fillOpacity: 0.8
+                        }).addTo(routeMapInstance).bindPopup('Start');
+                    }
+                }
+
+                // Fit map to bounds
+                if (bounds.isValid()) {
+                    routeMapInstance.fitBounds(bounds, { padding: [40, 40] });
+                }
+                
+                // Trigger resize to fix any display issues
+                routeMapInstance.invalidateSize();
+            }, 100);
         }
 
         function renderBusResults() {
@@ -661,45 +936,134 @@
                 return;
             }
 
-            availableBuses.forEach(bus => {
+            availableBuses.forEach((bus, idx) => {
                 const card = document.createElement('div');
-                card.className = 'bg-white rounded-xl border border-slate-200 shadow-sm p-4 animate-fade-in flex flex-col gap-3';
+                card.className = 'bg-white rounded-xl border border-slate-200 shadow-sm animate-fade-in overflow-hidden';
+                
+                const etaMinutes = parseInt(bus.eta);
+                const colors = ['#344d67', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+                const color = colors[idx % 5];
+
                 card.innerHTML = `
-                    <div class="flex justify-between items-center border-b border-slate-100 pb-3">
-                        <div class="flex items-center gap-3">
-                            <div class="bg-slate-100 text-brand-700 w-10 h-10 rounded-lg flex items-center justify-center shrink-0">
-                                <i class="fa-solid fa-bus-simple text-sm"></i>
+                    <div style="border-top: 4px solid ${color};" class="p-4 space-y-3">
+                        <!-- Total Time -->
+                        <div class="flex items-start justify-between">
+                            <div class="flex-1">
+                                <div class="text-[24px] font-bold text-slate-800">${etaMinutes} <span class="text-[14px] text-slate-500 font-medium">min</span></div>
+                                <div class="text-[11px] text-slate-500 mt-1 font-medium">${bus.start_stop} → ${bus.next_stop}</div>
                             </div>
-                            <div>
-                                <div class="font-bold text-[14px] text-slate-800 leading-tight">${bus.id}</div>
-                                <div class="text-[11px] text-slate-500 font-medium mt-0.5">${bus.route}</div>
+                            <button onclick="openBookingModal('${bus.id}')" class="bg-${color === '#344d67' ? 'brand-700' : color} text-white rounded-lg px-4 py-2 text-[11px] font-bold uppercase tracking-wider hover:opacity-90 transition-all">
+                                <i class="fa-solid fa-ticket mr-1"></i> Book
+                            </button>
+                        </div>
+
+                        <!-- Bus Info -->
+                        <div class="bg-[#f8fafc] rounded-lg p-3 flex items-center gap-3">
+                            <div class="bg-white border border-slate-200 w-10 h-10 rounded-lg flex items-center justify-center shrink-0">
+                                <i class="fa-solid fa-bus-simple text-${color === '#344d67' ? 'brand-700' : 'slate-600'} text-sm"></i>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="font-bold text-[13px] text-slate-800 leading-tight">${bus.liveBusId}</div>
+                                <div class="text-[10px] text-slate-500 mt-0.5">${bus.route}</div>
+                            </div>
+                            <div class="text-right text-[10px]">
+                                <div class="font-bold text-slate-800">Every 50 min</div>
+                                <div class="text-slate-500">Frequency</div>
+                            </div>
+                            <div class="text-right text-[10px]">
+                                <div class="font-bold text-emerald-600">₹${Math.round(bus.baseFare)}</div>
+                                <div class="text-slate-500">Base Fare</div>
                             </div>
                         </div>
-                        <div class="text-right">
-                           <div class="text-[10px] uppercase font-bold text-slate-400 mb-0.5 tracking-wider">Distance</div>
-                           <div class="text-[13px] font-bold text-emerald-600">${bus.distance}</div>
+
+                        <!-- Timeline -->
+                        <div class="space-y-2 py-2">
+                            <div class="flex gap-3 items-start">
+                                <div class="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-blue-50 text-blue-600 text-[12px]">
+                                    <i class="fa-solid fa-circle-dot"></i>
+                                </div>
+                                <div class="text-[11px] text-slate-700 mt-1"><span class="font-bold">Start:</span> ${bus.start_stop}</div>
+                            </div>
+                            <div class="flex gap-3 items-start">
+                                <div class="text-slate-300 text-center w-6" style="margin-top: -4px;"><i class="fa-solid fa-ellipsis text-[12px]"></i></div>
+                                <div class="text-[10px] text-slate-500">Walk <span class="font-bold">${bus.distance}</span></div>
+                            </div>
+                            <div class="flex gap-3 items-start">
+                                <div class="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style="background-color: ${color}20; color: ${color};">
+                                    <i class="fa-solid fa-bus text-[10px]"></i>
+                                </div>
+                                <div class="text-[11px] text-slate-700 mt-1"><span class="font-bold">Bus ride</span> - <span class="text-slate-500">39 stops</span></div>
+                            </div>
+                            <button onclick="toggleStops(${idx})" class="text-[10px] font-bold text-${color === '#344d67' ? 'brand-700' : 'slate-600'} hover:underline py-1 flex items-center gap-1">
+                                <i id="stops-icon-${idx}" class="fa-solid fa-chevron-down"></i> <span id="stops-text-${idx}">View ${bus.stops.length} Stops</span>
+                            </button>
+                            <div id="stops-list-${idx}" class="hidden mt-3 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 max-h-48 overflow-y-auto space-y-2 border border-blue-100">
+                                ${generateStopsList(bus, color)}
+                            </div>
+                            <div class="flex gap-3 items-start">
+                                <div class="text-slate-300 text-center w-6" style="margin-top: -4px;"><i class="fa-solid fa-ellipsis text-[12px]"></i></div>
+                                <div class="text-[10px] text-slate-500">Arrival <span class="font-bold">${bus.eta}</span></div>
+                            </div>
+                            <div class="flex gap-3 items-start">
+                                <div class="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-600 text-[12px]">
+                                    <i class="fa-solid fa-location-dot"></i>
+                                </div>
+                                <div class="text-[11px] text-slate-700 mt-1"><span class="font-bold">Destination:</span> ${bus.next_stop}</div>
+                            </div>
                         </div>
-                    </div>
-                    <div class="flex items-center justify-between pb-1 pt-1">
-                        <div class="text-[12px] font-medium text-slate-500">
-                            ETA <span class="text-blue-600 font-bold ml-1 bg-blue-50 px-1.5 py-0.5 rounded">${bus.eta}</span>
+
+                        <!-- CTA Buttons -->
+                        <div class="flex gap-2 pt-2">
+                            <button onclick="startTracking('${bus.id}')" class="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold rounded-lg py-2.5 text-[11px] tracking-wide transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+                                <i class="fa-solid fa-location-crosshairs"></i> TRACK
+                            </button>
                         </div>
-                        <div class="text-[12px] font-medium text-slate-500">
-                            Next Stop <span class="font-bold text-slate-800 ml-1">${bus.next_stop}</span>
-                        </div>
-                    </div>
-                    
-                    <div class="flex gap-2 mt-1">
-                        <button onclick="startTracking('${bus.id}')" class="flex-1 bg-[#f1f5f9] hover:bg-[#e2e8f0] text-slate-600 font-bold rounded-[10px] py-3 text-[12px] tracking-wide transition-colors flex items-center justify-center gap-1.5 shadow-sm">
-                            <i class="fa-solid fa-location-crosshairs"></i> TRACK
-                        </button>
-                        <button onclick="startBooking('${bus.id}')" class="flex-1 bg-[#344d67] hover:bg-[#2f4858] text-white font-bold rounded-[10px] py-3 text-[12px] tracking-wide transition-colors flex items-center justify-center gap-1.5 shadow-sm">
-                            <i class="fa-solid fa-ticket"></i> BOOK
-                        </button>
                     </div>
                 `;
                 busList.appendChild(card);
             });
+        }
+
+        function generateStopsList(bus, color) {
+            if (!bus.stops || bus.stops.length === 0) {
+                return '<div class="text-[10px] text-slate-500 text-center py-3 italic">No intermediate stops</div>';
+            }
+            
+            const maxDisplay = 15; // Show first 15 stops
+            const displayStops = bus.stops.slice(0, maxDisplay);
+            const hasMore = bus.stops.length > maxDisplay;
+            
+            return displayStops.map((stop, i) => `
+                <div class="flex gap-3 items-start group">
+                    <div class="relative flex flex-col items-center">
+                        <div class="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white" 
+                             style="background-color: ${color}; opacity: 0.8;">
+                            ${i + 1}
+                        </div>
+                        ${i < displayStops.length - 1 ? `<div class="w-0.5 h-6 my-0.5" style="background-color: ${color}; opacity: 0.3;"></div>` : ''}
+                    </div>
+                    <div class="flex-1 pt-0.5 pb-2 group-hover:bg-white group-hover:bg-opacity-50 rounded px-2 py-1 transition-colors">
+                        <div class="text-[11px] font-bold text-slate-800 leading-tight">${stop}</div>
+                        <div class="text-[8px] text-slate-500 mt-0.5">Stop ${i + 1} of ${bus.stops.length}</div>
+                    </div>
+                </div>
+            `).join('') + (hasMore ? `<div class="text-[9px] text-slate-500 italic font-medium text-center py-2 border-t border-dashed border-blue-200">... and ${bus.stops.length - maxDisplay} more stops</div>` : '');
+        }
+
+        function toggleStops(idx) {
+            const list = document.getElementById(`stops-list-${idx}`);
+            const icon = document.getElementById(`stops-icon-${idx}`);
+            const text = document.getElementById(`stops-text-${idx}`);
+            
+            if (list.classList.contains('hidden')) {
+                list.classList.remove('hidden');
+                icon.style.transform = 'rotate(180deg)';
+                text.innerText = 'Hide Stops';
+            } else {
+                list.classList.add('hidden');
+                icon.style.transform = 'rotate(0deg)';
+                text.innerText = 'View 39 Stops';
+            }
         }
 
         // Live Tracking
@@ -775,7 +1139,7 @@
             if(!currentActiveBus || !map || !busMarker) return;
 
             try {
-                const response = await fetch(`/api/bus-location?bus_id=${currentActiveBus.liveBusId}`);
+                const response = await fetch(`http://127.0.0.1:8010/api/bus-location?bus_id=${currentActiveBus.liveBusId}`);
                 if (!response.ok) {
                     if (Array.isArray(currentActiveBus.polyline) && currentActiveBus.polyline.length > 1) {
                         simulatedStepIndex = (simulatedStepIndex + 1) % currentActiveBus.polyline.length;
@@ -853,12 +1217,53 @@
         function calculateFare() {
             const count = parseInt(document.getElementById('book-passengers').value);
             pendingBooking.passengers = count;
+            pendingBooking.totalFare = (pendingBooking.baseFare * count);
+            document.getElementById('book-fare').innerText = `₹${Math.round(pendingBooking.totalFare)}`;
+        }
+
+        function openBookingModal(busId) {
+            const bus = availableBuses.find(b => b.id === busId) || availableBuses.find(b => b.liveBusId === busId);
+            if (!bus) return;
+
+            pendingBooking = {
+                bus_id: bus.liveBusId,
+                route: bus.route,
+                from: document.getElementById('input-from').value || bus.start_stop || "Current Stop",
+                to: document.getElementById('input-to').value || bus.next_stop || "Destination",
+                baseFare: bus.baseFare,
+                passengers: 1,
+                totalFare: bus.baseFare
+            };
+
+            document.getElementById('modal-book-bus-id').innerText = pendingBooking.bus_id;
+            document.getElementById('modal-book-bus-route').innerText = pendingBooking.route;
+            document.getElementById('modal-book-from').innerText = pendingBooking.from;
+            document.getElementById('modal-book-to').innerText = pendingBooking.to;
+            document.getElementById('modal-book-passengers').value = "1";
+            calculateFareModal();
+
+            document.getElementById('booking-modal').classList.remove('hidden');
+        }
+
+        function closeBookingModal() {
+            document.getElementById('booking-modal').classList.add('hidden');
+        }
+
+        function calculateFareModal() {
+            const count = parseInt(document.getElementById('modal-book-passengers').value);
+            pendingBooking.passengers = count;
             pendingBooking.totalFare = (pendingBooking.baseFare * count).toFixed(2);
-            document.getElementById('book-fare').innerText = `$${pendingBooking.totalFare}`;
+            document.getElementById('modal-book-fare').innerText = `$${pendingBooking.totalFare}`;
+        }
+
+        function goPaymentModal() {
+            closeBookingModal();
+            document.getElementById('pay-amount-btn').innerText = `₹${Math.round(pendingBooking.totalFare)}`;
+            showView('view-payment');
         }
 
         function goPayment() {
-            document.getElementById('pay-amount-btn').innerText = `$${pendingBooking.totalFare}`;
+            document.getElementById('pay-amount-btn').innerText = `₹${Math.round(pendingBooking.totalFare)}`;
             showView('view-payment');
         }
 
@@ -868,15 +1273,15 @@
             btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> PROCESSING...';
             btn.disabled = true;
 
-            const totalInCents = Math.round(pendingBooking.totalFare * 100);
+            const totalInPaisa = Math.round(pendingBooking.totalFare * 100);
 
             var options = {
                 "key": "rzp_test_Ym1XGvYlUlwHXX", // using a public placeholder testing key
-                "amount": totalInCents,
-                "currency": "USD", // Example
-                "name": "Stitch Transport",
+                "amount": totalInPaisa,
+                "currency": "INR",
+                "name": "PMPML Transit",
                 "description": "Bus Ticket Booking",
-                "image": "https://ui-avatars.com/api/?name=ST&background=2f4858&color=fff",
+                "image": "https://ui-avatars.com/api/?name=PMPML&background=2f4858&color=fff",
                 "handler": function (response) {
                     // Payment succeeded callback
                     btn.innerHTML = '<i class="fa-solid fa-check"></i> PAID';
@@ -889,7 +1294,7 @@
                         from: pendingBooking.from,
                         to: pendingBooking.to,
                         passengers: pendingBooking.passengers,
-                        fare: `$${pendingBooking.totalFare}`,
+                        fare: `₹${Math.round(pendingBooking.totalFare)}`,
                         status: "active",
                         date: "Today"
                     };
@@ -981,8 +1386,172 @@
             });
         }
 
+        function goTrackByNumber() {
+            clearInterval(liveInterval);
+            updateNavColors('nav-track');
+            document.getElementById('track-bus-number-input').value = '';
+            document.getElementById('tracked-bus-info').innerHTML = '';
+            document.getElementById('tracked-bus-info').classList.add('hidden');
+            showView('view-track-by-number');
+        }
+
+        async function trackBusByNumber() {
+            const busNumber = document.getElementById('track-bus-number-input').value.trim().toUpperCase();
+            const btn = document.getElementById('track-bus-btn');
+            const infoDiv = document.getElementById('tracked-bus-info');
+            
+            if (!busNumber) {
+                alert('Please enter a bus number');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Tracking...';
+            
+            try {
+                console.log('[DEBUG] Tracking bus:', busNumber);
+                await loadStopsData();
+                
+                // Search for buses with this number
+                const allStopNames = Object.keys(stopNameToIds);
+                if (allStopNames.length === 0) {
+                    alert('No data available');
+                    return;
+                }
+                
+                // Try to find buses with this number from a common destination
+                const randomDestination = allStopNames[Math.floor(Math.random() * Math.min(5, allStopNames.length))];
+                const endIds = stopNameToIds[randomDestination]?.join(',') || '';
+                
+                const response = await fetch(`http://127.0.0.1:8010/api/plan?end_id=${endIds}`);
+                if (!response.ok) throw new Error('Could not search for buses');
+                
+                const data = await response.json();
+                const foundBus = (data.options || []).find(opt => 
+                    String(opt.bus_no).toUpperCase() === busNumber
+                );
+                
+                if (!foundBus) {
+                    alert(`Bus ${busNumber} not found in current schedules`);
+                    return;
+                }
+                
+                // Start tracking this bus
+                const busToTrack = {
+                    id: `${foundBus.bus_no}-0`,
+                    liveBusId: String(foundBus.bus_no),
+                    route: foundBus.is_transfer ? 'Transfer Route' : 'Direct Route',
+                    eta: foundBus.eta,
+                    departure: foundBus.departure,
+                    start_stop: foundBus.start_stop,
+                    next_stop: 'Next Stop',
+                    polyline: foundBus.polyline || [],
+                    lat: foundBus.start_coords?.[0] || 18.5204,
+                    lng: foundBus.start_coords?.[1] || 73.8567,
+                    baseFare: Math.max(20, Number((20 + foundBus.eta * 2.5).toFixed(0)))
+                };
+                
+                // Display tracked bus info
+                infoDiv.innerHTML = `
+                    <div class="bg-white rounded-xl border border-emerald-100 shadow-md p-4 space-y-3">
+                        <div class="flex items-center justify-between pb-3 border-b border-emerald-100">
+                            <div>
+                                <div class="text-[16px] font-bold text-slate-800">${busToTrack.liveBusId}</div>
+                                <div class="text-[11px] text-slate-500 mt-0.5">${busToTrack.route}</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-[24px] font-bold text-emerald-600">${busToTrack.eta}</div>
+                                <div class="text-[10px] text-slate-500">min ETA</div>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bg-blue-50 rounded-lg p-3">
+                                <div class="text-[10px] text-slate-500 font-bold uppercase mb-1">From</div>
+                                <div class="text-[12px] font-bold text-slate-800">${busToTrack.start_stop}</div>
+                            </div>
+                            <div class="bg-emerald-50 rounded-lg p-3">
+                                <div class="text-[10px] text-slate-500 font-bold uppercase mb-1">Base Fare</div>
+                                <div class="text-[12px] font-bold text-emerald-600">₹${busToTrack.baseFare}</div>
+                            </div>
+                        </div>
+                        
+                        <div class="pt-3 border-t border-slate-200">
+                            <div class="text-[10px] text-slate-500 font-bold uppercase mb-2">Location</div>
+                            <div class="text-[12px] text-slate-800 font-mono">
+                                <div>Lat: ${busToTrack.lat.toFixed(4)}</div>
+                                <div>Lng: ${busToTrack.lng.toFixed(4)}</div>
+                            </div>
+                        </div>
+
+                        <button onclick="startTracking('${busToTrack.id}')" class="w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg py-3 font-bold text-[13px] flex items-center justify-center gap-2 hover:opacity-90 transition-all mt-4">
+                            <i class="fa-solid fa-map"></i> VIEW LIVE TRACKING
+                        </button>
+                    </div>
+                `;
+                
+                infoDiv.classList.remove('hidden');
+                console.log('[DEBUG] Bus tracked successfully:', busToTrack.liveBusId);
+                
+            } catch (err) {
+                console.error('[ERROR] Track by number failed:', err);
+                alert('Could not track bus: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-location-dot"></i> Track';
+            }
+        }
+
         // Start
         checkAuth();
     </script>
+
+    <!-- Booking Modal -->
+    <div id="booking-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl p-6 w-full max-w-md space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Book Ticket</h3>
+                <button onclick="closeBookingModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="space-y-4">
+                <div class="flex items-center gap-3 border-b border-slate-100 pb-3">
+                    <div class="bg-slate-100 text-brand-700 w-10 h-10 rounded-lg flex items-center justify-center shrink-0">
+                        <i class="fa-solid fa-bus-simple text-sm"></i>
+                    </div>
+                    <div>
+                        <div id="modal-book-bus-id" class="font-bold text-[14px] text-slate-800 leading-tight">BUS-XX</div>
+                        <div id="modal-book-bus-route" class="text-[11px] text-slate-500 font-medium mt-0.5">Route --</div>
+                    </div>
+                </div>
+                <div class="flex gap-4">
+                    <div class="flex-1">
+                        <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider block">From</label>
+                        <div id="modal-book-from" class="text-[13px] font-bold text-slate-800 bg-[#f8fafc] border border-slate-200 rounded py-2 px-3 truncate">Downtown</div>
+                    </div>
+                    <div class="flex-1">
+                        <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider block">To</label>
+                        <div id="modal-book-to" class="text-[13px] font-bold text-slate-800 bg-[#f8fafc] border border-slate-200 rounded py-2 px-3 truncate">Akurdi</div>
+                    </div>
+                </div>
+                <div>
+                    <label class="text-[10px] uppercase font-bold text-slate-400 mb-1 tracking-wider block">Passengers</label>
+                    <select id="modal-book-passengers" onchange="calculateFareModal()" class="w-full bg-[#f8fafc] border border-slate-200 rounded py-2.5 px-3 text-sm font-bold text-slate-800 focus:outline-none focus:border-brand-700">
+                        <option value="1">1 Person</option>
+                        <option value="2">2 People</option>
+                        <option value="3">3 People</option>
+                        <option value="4">4 People</option>
+                    </select>
+                </div>
+                <div class="pt-3 border-t border-dashed border-slate-200 flex justify-between items-center">
+                    <span class="text-[13px] font-medium text-slate-500">Total Fare</span>
+                    <span id="modal-book-fare" class="font-bold text-[18px] text-emerald-600">$2.50</span>
+                </div>
+            </div>
+            <button onclick="goPaymentModal()" class="w-full bg-[#344d67] text-white rounded-[10px] py-[14px] font-bold text-[13px] flex items-center justify-center gap-2 shadow-sm hover:opacity-90 transition-all uppercase tracking-wide">
+                PROCEED TO PAYMENT <i class="fa-solid fa-arrow-right ml-1"></i>
+            </button>
+        </div>
+    </div>
+
 </body>
 </html>

@@ -53,6 +53,10 @@
             <datalist id="s-list">{% for s in stops %}<option value="{{s.stop_name}}"></option>{% endfor %}</datalist>
             <button class="search-btn" onclick="triggerSearch()">Search</button>
         </div>
+        <div class="input-row">
+            <input id="busNumberInput" placeholder="Or search by bus number (e.g., 5, 10C)">
+            <button class="search-btn" onclick="searchByBusNumber()">Track Bus</button>
+        </div>
         <div id="results-list" style="max-height: 420px; overflow-y: auto;"></div>
     </div>
 

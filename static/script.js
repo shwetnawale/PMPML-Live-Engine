@@ -49,10 +49,7 @@ function triggerSearch() {
 
         if(!data.options || !data.options.length) {
             listPanel.innerHTML = '<div style="color:#5f6368; padding:10px 2px;">No direct buses found for this stop at current simulation time.</div>';
-            walkDots.forEach(d => map.removeLayer(d));
-            if(busLine) map.removeLayer(busLine);
-            walkDots = [];
-            busLine = null;
+            clearMapOverlays();
             return;
         }
         
@@ -65,6 +62,7 @@ function triggerSearch() {
                     <div>
                         <div style="font-weight:bold; font-size:15px">${opt.departure}</div>
                         <div style="font-size:12px; color:#5f6368">🚶 ${opt.walk_dist}m to ${opt.start_stop}</div>
+                        <div style="font-size:12px; color:#1e8e3e; font-weight:bold;">₹${opt.fare_inr || 'N/A'} (${opt.distance_km || 'N/A'}km)</div>
                     </div>
                 </div>
                 <div class="eta-label">${opt.eta} min</div>
@@ -82,9 +80,7 @@ function triggerSearch() {
 
 function renderTrip(opt) {
     // Clear old route and walking dots
-    walkDots.forEach(d => map.removeLayer(d));
-    if(busLine) map.removeLayer(busLine);
-    walkDots = [];
+    clearMapOverlays();
 
     // 1. Render Blue-Dot Walking Path (Circular Dots)
     if(typeof uLat === 'number' && typeof uLon === 'number') {
@@ -98,8 +94,17 @@ function renderTrip(opt) {
     }
 
     // 2. Render Bus Segment Polyline
-    busLine = L.polyline(opt.polyline, {color: '#1a73e8', weight: 5, opacity: 0.8}).addTo(map);
-    map.fitBounds(busLine.getBounds(), {padding: [120, 120]});
+    if(opt.polyline && opt.polyline.length > 0) {
+        busLine = L.polyline(opt.polyline, {color: '#1a73e8', weight: 5, opacity: 0.8}).addTo(map);
+        // Ensure map fits bounds with proper timeout for rendering
+        setTimeout(() => {
+            try {
+                map.fitBounds(busLine.getBounds(), {padding: [120, 120]});
+            } catch(e) {
+                console.log("Map bounds error:", e);
+            }
+        }, 100);
+    }
 }
 
 function toggleSimulation() {
@@ -114,4 +119,56 @@ function toggleSimulation() {
             });
         }, 1000); // 1s real = 1m simulation
     }
+}
+
+function clearMapOverlays() {
+    // Clear all overlays from map
+    walkDots.forEach(d => map.removeLayer(d));
+    if(busLine) map.removeLayer(busLine);
+    walkDots = [];
+    busLine = null;
+}
+
+function searchByBusNumber() {
+    const busNo = document.getElementById('busNumberInput')?.value?.trim();
+    if(!busNo) return alert("Please enter a bus number");
+
+    const listPanel = document.getElementById('results-list');
+    listPanel.innerHTML = '<div style="color:#5f6368; padding:10px 2px;">Searching for bus ' + busNo + '...</div>';
+    
+    fetch(`/api/search-bus?bus_no=${encodeURIComponent(busNo)}`)
+    .then(res => res.json()).then(data => {
+        listPanel.innerHTML = "";
+        
+        if(!data.found) {
+            listPanel.innerHTML = '<div style="color:#d93025; padding:10px 2px;">' + data.message + '</div>';
+            clearMapOverlays();
+            return;
+        }
+        
+        let content = `<div style="padding:10px; background:#f1f3f4; border-radius:8px; margin-bottom:10px;">
+                        <div style="font-weight:bold; color:#1a73e8; font-size:14px;">Bus ${data.bus_no} Routes</div>
+                       </div>`;
+        
+        data.routes.forEach(route => {
+            content += `<div style="padding:8px; border-left:4px solid #1a73e8; margin-bottom:10px; background:#f8f9fa; border-radius:4px;">
+                         <div style="font-weight:bold; font-size:14px;">${route.route_name}</div>`;
+            
+            route.trips.forEach(trip => {
+                content += `<div style="font-size:12px; margin-top:5px; padding:5px; background:white; border-radius:4px;">
+                             <div><strong>${trip.start_stop}</strong> → <strong>${trip.end_stop}</strong></div>
+                             <div style="color:#5f6368; font-size:11px;">⏱️ ${trip.departure} - ${trip.arrival}</div>
+                             <div style="color:#1e8e3e; font-weight:bold; font-size:12px;">₹${trip.fare_inr} (${trip.stops_count} stops)</div>
+                            </div>`;
+            });
+            
+            content += `</div>`;
+        });
+        
+        listPanel.innerHTML = content;
+        clearMapOverlays();
+    })
+    .catch(() => {
+        listPanel.innerHTML = '<div style="color:#d93025; padding:10px 2px;">Unable to search for bus. Please try again.</div>';
+    });
 }

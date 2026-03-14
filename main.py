@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
 import os
@@ -12,6 +13,15 @@ from datetime import datetime, timedelta
 import time
 
 app = FastAPI()
+
+# --- CORS MIDDLEWARE ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # --- UNIVERSAL CLOCK LOGIC ---
 class UniversalClock:
@@ -120,6 +130,39 @@ def align_to_reference(raw_seconds: int, reference_seconds: int) -> int:
     return aligned
 
 
+def calculate_fare_inr(distance_km: float) -> float:
+    """
+    Calculate bus fare in Indian Rupees (₹) based on distance.
+    Standard PMPML pricing: Base fare + per km charge
+    """
+    base_fare = 5.0  # ₹5 base fare
+    per_km_charge = 1.5  # ₹1.5 per km
+    
+    if distance_km <= 0:
+        return base_fare
+    
+    fare = base_fare + (distance_km * per_km_charge)
+    # Round to nearest 50 paise
+    fare = round(fare * 2) / 2
+    return max(5.0, fare)  # Minimum ₹5
+
+
+def calculate_distance_for_route(polyline: list) -> float:
+    """
+    Calculate total distance from polyline coordinates (in km)
+    """
+    if not polyline or len(polyline) < 2:
+        return 0.0
+    
+    total_distance = 0.0
+    for i in range(len(polyline) - 1):
+        lat1, lon1 = polyline[i]
+        lat2, lon2 = polyline[i + 1]
+        total_distance += calculate_distance(lat1, lon1, lat2, lon2)
+    
+    return total_distance
+
+
 def build_polyline_from_segment(segment_df: pd.DataFrame) -> list[list[float]]:
     if segment_df is None or segment_df.empty:
         return []
@@ -197,6 +240,83 @@ def get_stops():
 @app.get("/api/nearest-stop")
 def get_nearest_stop(lat: float, lon: float):
     return nearest_stop_from_coords(lat, lon)
+
+
+@app.get("/api/search-bus")
+def search_bus_by_number(bus_no: str):
+    """
+    Search and track buses by their bus number.
+    Returns all trips for the given bus number with timing and route info.
+    """
+    bus_no_str = str(bus_no).strip().upper()
+    
+    # Find all routes matching this bus number
+    matching_routes = ROUTES[ROUTES['route_short_name'].astype(str).str.upper().str.strip() == bus_no_str]
+    
+    if matching_routes.empty:
+        return {
+            "bus_no": bus_no_str,
+            "found": False,
+            "message": f"Bus number {bus_no_str} not found"
+        }
+    
+    bus_routes = []
+    for _, route in matching_routes.iterrows():
+        route_id = str(route['route_id'])
+        route_name = str(route['route_long_name'])
+        route_short = str(route['route_short_name'])
+        
+        # Find all trips for this route
+        trips_for_route = TRIPS[TRIPS['route_id'].astype(str) == route_id]
+        
+        if trips_for_route.empty:
+            continue
+            
+        # Get timing info and stops for first few trips
+        trip_details = []
+        for _, trip in trips_for_route.head(3).iterrows():
+            trip_id = str(trip['trip_id'])
+            trip_stops = STOP_TIMES_BY_TRIP.get(trip_id)
+            
+            if trip_stops is not None and not trip_stops.empty:
+                first_stop = trip_stops.iloc[0]
+                last_stop = trip_stops.iloc[-1]
+                
+                start_stop_id = str(first_stop['stop_id'])
+                end_stop_id = str(last_stop['stop_id'])
+                
+                start_stop_name = STOPS_BY_ID.loc[start_stop_id, 'stop_name'] if start_stop_id in STOPS_BY_ID.index else "Unknown"
+                end_stop_name = STOPS_BY_ID.loc[end_stop_id, 'stop_name'] if end_stop_id in STOPS_BY_ID.index else "Unknown"
+                
+                # Calculate route polyline and fare
+                polyline = build_polyline_from_segment(trip_stops)
+                distance_km = calculate_distance_for_route(polyline)
+                fare_inr = calculate_fare_inr(distance_km)
+                
+                trip_details.append({
+                    "trip_id": trip_id,
+                    "departure": str(first_stop['departure_time']),
+                    "arrival": str(last_stop['arrival_time']),
+                    "start_stop": start_stop_name,
+                    "end_stop": end_stop_name,
+                    "distance_km": round(distance_km, 2),
+                    "fare_inr": round(fare_inr, 2),
+                    "stops_count": len(trip_stops)
+                })
+        
+        if trip_details:
+            bus_routes.append({
+                "route_id": route_id,
+                "route_name": route_name,
+                "route_short": route_short,
+                "trips": trip_details
+            })
+    
+    return {
+        "bus_no": bus_no_str,
+        "found": len(bus_routes) > 0,
+        "routes": bus_routes
+    }
 
 @app.post("/api/tick")
 async def clock_tick(): return {"time": clock.tick(1)}
@@ -314,12 +434,32 @@ def plan_route(end_id: str, u_lat: Optional[float] = None, u_lon: Optional[float
                 if not polyline:
                     continue
 
+                # Extract stop names from path segment
+                stop_names_list = []
+                try:
+                    for _, row in path_segment.sort_values('stop_sequence').iterrows():
+                        stop_id = str(row['stop_id'])
+                        if stop_id in STOPS_BY_ID.index:
+                            stop_name = str(STOPS_BY_ID.loc[stop_id, 'stop_name'])
+                            if stop_name not in stop_names_list:  # Avoid duplicates
+                                stop_names_list.append(stop_name)
+                except Exception as e:
+                    print(f"[DEBUG] Error extracting stops: {e}")
+                    stop_names_list = []
+
+                # Calculate distance and fare for this route
+                distance_km = calculate_distance_for_route(polyline)
+                fare_inr = calculate_fare_inr(distance_km)
+
                 all_options.append({
                     "bus_no": bus_no,
                     "departure": str(trip['departure_time_s']),
                     "eta": eta_minutes,
+                    "stops": stop_names_list,
                     "start_stop": start_stop['stop_name'],
                     "walk_dist": round(start_stop['dist'] * 1000),
+                    "distance_km": round(distance_km, 2),
+                    "fare_inr": round(fare_inr, 2),
                     "start_coords": [float(start_stop['stop_lat']), float(start_stop['stop_lon'])],
                     "polyline": polyline
                 })
@@ -416,6 +556,35 @@ def plan_route(end_id: str, u_lat: Optional[float] = None, u_lon: Optional[float
                 else:
                     polyline = leg1_coords + leg2_coords
 
+                # Extract stops for leg 1 and leg 2
+                leg1_stops = []
+                try:
+                    for _, row in leg1_path_segment.sort_values('stop_sequence').iterrows():
+                        stop_id = str(row['stop_id'])
+                        if stop_id in STOPS_BY_ID.index:
+                            stop_name = str(STOPS_BY_ID.loc[stop_id, 'stop_name'])
+                            if stop_name not in leg1_stops:
+                                leg1_stops.append(stop_name)
+                except Exception as e:
+                    print(f"[DEBUG] Error extracting leg1 stops: {e}")
+                    leg1_stops = []
+                
+                leg2_stops = []
+                try:
+                    for _, row in leg2_path_segment.sort_values('stop_sequence').iterrows():
+                        stop_id = str(row['stop_id'])
+                        if stop_id in STOPS_BY_ID.index:
+                            stop_name = str(STOPS_BY_ID.loc[stop_id, 'stop_name'])
+                            if stop_name not in leg2_stops:
+                                leg2_stops.append(stop_name)
+                except Exception as e:
+                    print(f"[DEBUG] Error extracting leg2 stops: {e}")
+                    leg2_stops = []
+
+                # Calculate distance and fare for transfer route
+                total_distance_km = calculate_distance_for_route(polyline)
+                total_fare_inr = calculate_fare_inr(total_distance_km)
+
                 eta_minutes = max(0, int((dep1_eff - curr_seconds) / 60))
                 transfer_options.append(
                     {
@@ -424,8 +593,11 @@ def plan_route(end_id: str, u_lat: Optional[float] = None, u_lon: Optional[float
                         'eta': eta_minutes,
                         'start_stop': start_stop['stop_name'],
                         'walk_dist': round(start_stop['dist'] * 1000),
+                        'distance_km': round(total_distance_km, 2),
+                        'fare_inr': round(total_fare_inr, 2),
                         'start_coords': [float(start_stop['stop_lat']), float(start_stop['stop_lon'])],
                         'polyline': polyline,
+                        'stops': leg1_stops + leg2_stops,
                         'is_transfer': True,
                         'transfer_stop': transfer_stop_id,
                     }
