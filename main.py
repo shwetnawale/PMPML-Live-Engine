@@ -107,6 +107,8 @@ class BusLocationPayload(BaseModel):
     latitude: float
     longitude: float
     timestamp: Optional[str] = None
+    speed: Optional[float] = None
+    route: Optional[str] = None
 
 
 BUS_LOCATIONS: dict[str, dict] = {}
@@ -328,11 +330,37 @@ def update_bus_location(payload: BusLocationPayload):
     if not bus_id:
         raise HTTPException(status_code=400, detail="Missing bus_id")
 
+    previous = BUS_LOCATIONS.get(bus_id)
+    speed = payload.speed
+    if speed is None and previous is not None:
+        previous_timestamp = previous.get("timestamp")
+        current_timestamp = payload.timestamp or datetime.utcnow().isoformat()
+        try:
+            start_dt = datetime.fromisoformat(str(previous_timestamp).replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(str(current_timestamp).replace("Z", "+00:00"))
+            elapsed_seconds = max((end_dt - start_dt).total_seconds(), 0)
+        except ValueError:
+            elapsed_seconds = 0
+
+        if elapsed_seconds > 0:
+            distance_km = calculate_distance(
+                float(previous["latitude"]),
+                float(previous["longitude"]),
+                payload.latitude,
+                payload.longitude,
+            )
+            speed = round((distance_km / elapsed_seconds) * 3600, 1)
+
+    if speed is None:
+        speed = 0.0
+
     BUS_LOCATIONS[bus_id] = {
         "bus_id": bus_id,
         "latitude": payload.latitude,
         "longitude": payload.longitude,
         "timestamp": payload.timestamp or datetime.utcnow().isoformat(),
+        "speed": speed,
+        "route": payload.route or (previous or {}).get("route") or bus_id,
         "lastUpdated": int(time.time() * 1000),
     }
     return {"success": True}
@@ -351,8 +379,12 @@ def get_bus_location(bus_id: str):
     is_stale = int(time.time() * 1000) - int(location["lastUpdated"]) > 30000
     return {
         "bus_id": location["bus_id"],
+        "lat": location["latitude"],
+        "lng": location["longitude"],
         "latitude": location["latitude"],
         "longitude": location["longitude"],
+        "speed": float(location.get("speed") or 0.0),
+        "route": location.get("route") or location["bus_id"],
         "timestamp": location["timestamp"],
         "isStale": is_stale,
     }

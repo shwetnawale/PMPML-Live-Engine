@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CitySaarthi | Live Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        .leaflet-marker-icon { transition: all 1.5s linear; }
+    </style>
+</head>
+<body class="bg-slate-50 font-sans antialiased">
+
+    <header class="bg-[#2f4858] p-6 text-white shadow-2xl flex justify-between items-center border-b-4 border-orange-500">
+        <div>
+            <h1 class="text-2xl font-black italic tracking-tighter uppercase">CitySaarthi</h1>
+            <div id="sync-status" class="text-[10px] text-orange-400 font-bold uppercase tracking-widest mt-1">● SEARCHING FOR ENGINE...</div>
+        </div>
+        <div class="text-right">
+            <span class="block text-[10px] font-bold text-slate-400 uppercase">System Status</span>
+            <span class="text-xs font-black text-emerald-400">ENCRYPTED LINK</span>
+        </div>
+    </header>
+
+    <div id="map" class="h-[60vh] w-full shadow-inner z-0"></div>
+
+    <main class="p-6 -mt-10 relative z-10">
+        <div class="bg-white rounded-[2rem] p-8 shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-slate-100">
+            <div class="flex justify-between items-start mb-8">
+                <div>
+                    <h2 id="bus-id-label" class="text-2xl font-black text-slate-800 uppercase tracking-tight">STANDBY</h2>
+                    <p id="route-label" class="text-sm text-slate-400 font-medium italic">Establishing satellite connection...</p>
+                </div>
+                <div id="status-badge" class="bg-slate-100 text-slate-400 text-[10px] font-black px-4 py-2 rounded-full uppercase border border-slate-200">Offline</div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div class="bg-slate-50 p-6 rounded-3xl border border-slate-100 transition-all hover:bg-white hover:shadow-lg">
+                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Live Velocity</span>
+                    <span id="speed-label" class="text-4xl font-black text-[#2f4858]">0 <small class="text-xs uppercase">km/h</small></span>
+                </div>
+                <div class="bg-slate-50 p-6 rounded-3xl border border-slate-100 transition-all hover:bg-white hover:shadow-lg">
+                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Last Sync</span>
+                    <span id="time-label" class="text-sm font-black text-[#2f4858]">SCANNING...</span>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const ENGINE_URL = 'https://e7d9-2402-a00-1b2-11cf-252f-e8b4-a212-706f.ngrok-free.app';
+        const BUS_TARGET = 'BUS-39';
+
+        const map = L.map('map', { zoomControl: false }).setView([18.7302, 73.6745], 14);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png').addTo(map);
+
+        const busIcon = L.icon({
+            iconUrl: 'https://cdn-icons-png.flaticon.com/512/3448/3448339.png',
+            iconSize: [50, 50],
+            iconAnchor: [25, 25]
+        });
+
+        let marker = L.marker([0, 0], { icon: busIcon }).addTo(map);
+
+        async function runSync() {
+            try {
+                const response = await fetch(`${ENGINE_URL}/api/bus-location?bus_id=${encodeURIComponent(BUS_TARGET)}`);
+                if (!response.ok) throw new Error('Connection Interrupted');
+
+                const data = await response.json();
+                const pos = [Number(data.lat), Number(data.lng)];
+
+                if (!Number.isFinite(pos[0]) || !Number.isFinite(pos[1])) {
+                    throw new Error('Invalid coordinates');
+                }
+
+                marker.setLatLng(pos);
+                map.panTo(pos, { animate: true, duration: 1.5 });
+
+                document.getElementById('sync-status').innerText = '● ENGINE SYNCED (LIVE)';
+                document.getElementById('sync-status').classList.replace('text-orange-400', 'text-emerald-400');
+
+                const badge = document.getElementById('status-badge');
+                badge.innerText = 'Active';
+                badge.className = 'bg-emerald-100 text-emerald-700 text-[10px] font-black px-4 py-2 rounded-full uppercase border border-emerald-200';
+
+                document.getElementById('bus-id-label').innerText = data.bus_id || BUS_TARGET;
+                document.getElementById('route-label').innerText = data.route || 'Route unavailable';
+                document.getElementById('speed-label').innerHTML = `${Math.round(Number(data.speed || 0))} <small class="text-xs uppercase">km/h</small>`;
+                document.getElementById('time-label').innerText = new Date(data.timestamp || Date.now()).toLocaleTimeString();
+            } catch (err) {
+                document.getElementById('sync-status').innerText = '● RECONNECTING TO ENGINE...';
+                document.getElementById('sync-status').classList.replace('text-emerald-400', 'text-orange-400');
+                document.getElementById('status-badge').innerText = 'Wait';
+            }
+        }
+
+        runSync();
+        setInterval(runSync, 3000);
+    </script>
+</body>
+</html>

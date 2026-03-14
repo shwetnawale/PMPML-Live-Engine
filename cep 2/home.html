@@ -63,6 +63,38 @@
             box-shadow: 0 6px 18px rgba(0,0,0,0.12);
         }
 
+        .live-hero {
+            position: relative;
+            overflow: hidden;
+            background:
+                radial-gradient(circle at top left, rgba(255,255,255,0.82), rgba(255,255,255,0.58) 32%, rgba(239,246,255,0.72) 100%),
+                linear-gradient(135deg, #d9ede7 0%, #f7efe4 55%, #d6e4f4 100%);
+        }
+
+        .live-hero::after {
+            content: '';
+            position: absolute;
+            inset: auto -40px -60px auto;
+            width: 180px;
+            height: 180px;
+            background: rgba(47, 72, 88, 0.08);
+            border-radius: 999px;
+            filter: blur(10px);
+        }
+
+        .telemetry-card {
+            border-radius: 22px;
+            border: 1px solid rgba(226, 232, 240, 0.9);
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: 0 18px 34px rgba(15, 23, 42, 0.06);
+        }
+
+        .telemetry-card-dark {
+            background: #102330;
+            color: #fff;
+            border-color: rgba(15, 23, 42, 0.14);
+        }
+
         .map-fullscreen-active #map-fullscreen-info { display: block; }
         #tracking-map-card:fullscreen { background: #e5e5f7; }
         #tracking-map-card:fullscreen #map { width: 100vw !important; height: 100vh !important; }
@@ -194,40 +226,54 @@
             <!-- VIEW 3: LIVE TRACKING -->
             <div id="view-tracking" class="hide space-y-4 animate-fade-in">
                 <div class="flex justify-between items-center">
-                     <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Vehicle Identification</h3>
+                     <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Passenger Live Hub</h3>
                      <button onclick="goResults()" class="text-[11px] font-bold text-[#8e9cae] hover:text-brand-700 transition uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-arrow-left"></i> Back</button>
                 </div>
 
-                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-3.5 flex items-center gap-3 justify-between">
-                    <div class="flex items-center gap-3">
-                        <div class="bg-slate-100 p-2 rounded-lg text-slate-500">
-                            <i class="fa-regular fa-id-card text-lg"></i>
+                <div class="live-hero rounded-[28px] border border-white/70 p-5 shadow-lg">
+                    <div class="relative z-10 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div class="flex items-start gap-3">
+                            <div class="bg-[#2f4858] text-white rounded-2xl w-12 h-12 flex items-center justify-center shadow-sm shrink-0">
+                                <i class="fa-solid fa-bus-simple text-lg"></i>
+                            </div>
+                            <div>
+                                <div class="text-[10px] font-bold tracking-[0.32em] text-slate-500 uppercase">Continuous Synchronization</div>
+                                <div id="track-bus-id" class="font-bold text-slate-800 text-[22px] tracking-tight mt-1">BUS-XX</div>
+                                <div id="route-badge" class="text-[12px] text-slate-500 font-medium mt-1">Route --</div>
+                            </div>
                         </div>
-                        <span id="track-bus-id" class="font-bold text-slate-800 text-[15px] tracking-tight">BUS-XX</span>
+                        <div class="flex items-center gap-3">
+                            <div id="sync-chip" class="rounded-full bg-orange-50 text-orange-500 px-4 py-2 text-[10px] font-black uppercase tracking-[0.32em]">Searching for server...</div>
+                            <button onclick="bookFromTracking()" class="bg-brand-700 text-white rounded-xl px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider hover:bg-[#2f4858] transition-colors"><i class="fa-solid fa-ticket mr-1"></i> Book</button>
+                        </div>
                     </div>
-                    <!-- Direct Book button from tracking -->
-                    <button onclick="bookFromTracking()" class="bg-brand-700 text-white rounded px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider hover:bg-[#2f4858] transition-colors"><i class="fa-solid fa-ticket mr-1"></i> Book</button>
                 </div>
 
-                <!-- LIVE GPS TELEMETRY BLOCK -->
-                <div class="border-[1.5px] border-dashed border-slate-300 bg-white rounded-xl p-4 shadow-sm relative overflow-hidden">
+                <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <div class="telemetry-card telemetry-card-dark p-4">
+                        <div class="text-[10px] uppercase tracking-[0.32em] text-slate-400">Velocity</div>
+                        <div id="speed-val" class="mt-3 text-[28px] font-black tracking-tight">0 <span class="text-[11px] uppercase text-slate-400">km/h</span></div>
+                    </div>
+                    <div class="telemetry-card p-4">
+                        <div class="text-[10px] uppercase tracking-[0.32em] text-slate-400">Last Update</div>
+                        <div id="time-val" class="mt-3 text-[14px] font-black text-[#2f4858]">Pending</div>
+                    </div>
+                    <div class="telemetry-card p-4">
+                        <div class="text-[10px] uppercase tracking-[0.32em] text-slate-400">Latitude</div>
+                        <div id="lat-val" class="mt-3 text-[14px] font-black text-slate-800">--</div>
+                    </div>
+                    <div class="telemetry-card p-4">
+                        <div class="text-[10px] uppercase tracking-[0.32em] text-slate-400">Longitude</div>
+                        <div id="lng-val" class="mt-3 text-[14px] font-black text-slate-800">--</div>
+                    </div>
+                </div>
+
+                <div class="telemetry-card p-4 shadow-sm relative overflow-hidden">
                     <h2 class="text-[10px] font-bold tracking-widest text-[#2f4858] mb-4 flex items-center gap-2 uppercase">
                         <i class="fa-solid fa-location-dot"></i> Live GPS Telemetry
                     </h2>
-                    
+
                     <div class="space-y-0.5 mt-2">
-                        <div class="flex justify-between items-center py-2.5">
-                            <span class="text-[13px] font-medium text-slate-500">Latitude</span>
-                            <span id="lat-val" class="font-bold text-[14px] text-slate-800">--</span>
-                        </div>
-                        <div class="w-full h-px bg-slate-100"></div>
-                        <div class="flex justify-between items-center py-2.5">
-                            <span class="text-[13px] font-medium text-slate-500">Longitude</span>
-                            <span id="lng-val" class="font-bold text-[14px] text-slate-800">--</span>
-                        </div>
-                    </div>
-                    
-                    <div class="space-y-0.5 mt-3 pt-3 border-t border-slate-100">
                         <div class="flex justify-between items-center py-2.5">
                             <span class="text-[13px] font-medium text-slate-500">Next stop</span>
                             <span id="next-stop-val" class="font-bold text-[14px] text-brand-700">--</span>
@@ -239,6 +285,18 @@
                         </div>
                     </div>
 
+                    <div class="space-y-0.5 mt-3 pt-3 border-t border-slate-100">
+                        <div class="flex justify-between items-center py-2.5">
+                            <span class="text-[13px] font-medium text-slate-500">Sync mode</span>
+                            <span id="sync-mode" class="font-bold text-[14px] text-slate-800">Polling / 3 sec</span>
+                        </div>
+                        <div class="w-full h-px bg-slate-100"></div>
+                        <div class="flex justify-between items-center py-2.5">
+                            <span class="text-[13px] font-medium text-slate-500">Status</span>
+                            <div id="engine-status" class="bg-orange-50 text-orange-500 px-2.5 py-1 rounded font-bold text-[13px]">Searching</div>
+                        </div>
+                    </div>
+
                     <div class="mt-4 text-[10px] text-slate-400 font-medium flex items-center gap-1.5 pt-3 border-t border-dashed border-slate-200">
                         <i class="fa-solid fa-clock-rotate-left"></i> Last updated: <span id="update-time" class="text-slate-500">Just now</span>
                     </div>
@@ -246,7 +304,7 @@
 
                 <!-- MAP SECTION -->
                 <div id="tracking-map-card" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative">
-                    <div class="absolute bottom-3 left-3 z-[400] bg-white text-[11px] font-bold px-3 py-1.5 rounded-lg shadow-md border border-slate-100 text-slate-700" id="route-badge">
+                    <div class="absolute bottom-3 left-3 z-[400] bg-white text-[11px] font-bold px-3 py-1.5 rounded-lg shadow-md border border-slate-100 text-slate-700" id="tracking-route-badge">
                         Route --
                     </div>
                     <button id="map-fullscreen-btn" onclick="toggleMapFullscreen()" type="button"><i class="fa-solid fa-expand"></i> Fullscreen</button>
@@ -407,6 +465,9 @@
     </div>
 
     <script>
+        const LIVE_ENGINE_ORIGIN = 'https://e7d9-2402-a00-1b2-11cf-252f-e8b4-a212-706f.ngrok-free.app';
+        const API_BASE = window.location.protocol === 'file:' ? LIVE_ENGINE_ORIGIN : window.location.origin;
+
         // DOM Elements
         const mainHeader = document.getElementById('main-header');
         const systemStatus = document.getElementById('system-status');
@@ -457,6 +518,17 @@
             document.getElementById('fs-coords').innerText = coords;
         }
 
+        function setLiveStatus({ headline, badge, tone }) {
+            const syncChip = document.getElementById('sync-chip');
+            const engineStatus = document.getElementById('engine-status');
+
+            syncChip.innerText = headline;
+            engineStatus.innerText = badge;
+
+            syncChip.className = `rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.32em] ${tone === 'live' ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-500'}`;
+            engineStatus.className = `px-2.5 py-1 rounded font-bold text-[13px] ${tone === 'live' ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-500'}`;
+        }
+
         function refreshFullscreenState() {
             const card = document.getElementById('tracking-map-card');
             const btn = document.getElementById('map-fullscreen-btn');
@@ -491,7 +563,7 @@
             if (stopNames.length > 0) return;
 
             try {
-                const baseUrl = window.location.protocol === 'file:' ? 'http://127.0.0.1:8010' : '';
+                const baseUrl = API_BASE;
                 console.log('[DEBUG] Base URL:', baseUrl);
                 console.log('[DEBUG] Fetching stops from API...');
                 
@@ -680,7 +752,7 @@
                     params.set('u_lat', geo.lat);
                     params.set('u_lon', geo.lon);
 
-                    const nearestRes = await fetch(`http://127.0.0.1:8010/api/nearest-stop?lat=${geo.lat}&lon=${geo.lon}`);
+                    const nearestRes = await fetch(`${API_BASE}/api/nearest-stop?lat=${geo.lat}&lon=${geo.lon}`);
                     if (nearestRes.ok) {
                         const nearestData = await nearestRes.json();
                         if (nearestData.stop_name) {
@@ -689,7 +761,7 @@
                     }
                 }
 
-                const response = await fetch(`http://127.0.0.1:8010/api/plan?${params.toString()}`);
+                const response = await fetch(`${API_BASE}/api/plan?${params.toString()}`);
                 if (!response.ok) {
                     throw new Error('Failed to fetch bus options');
                 }
@@ -747,7 +819,7 @@
                     return;
                 }
                 
-                const nearestRes = await fetch(`http://127.0.0.1:8010/api/nearest-stop?lat=${geo.lat}&lon=${geo.lon}`);
+                const nearestRes = await fetch(`${API_BASE}/api/nearest-stop?lat=${geo.lat}&lon=${geo.lon}`);
                 if (!nearestRes.ok) throw new Error('Could not find nearby stop');
                 
                 const nearestData = await nearestRes.json();
@@ -784,7 +856,7 @@
                 console.log('[DEBUG] User location:', geo.lat, geo.lon);
                 
                 // Get nearest stop from user
-                const nearestRes = await fetch(`http://127.0.0.1:8010/api/nearest-stop?lat=${geo.lat}&lon=${geo.lon}`);
+                const nearestRes = await fetch(`${API_BASE}/api/nearest-stop?lat=${geo.lat}&lon=${geo.lon}`);
                 if (!nearestRes.ok) throw new Error('Could not find nearby stops');
                 
                 const nearestData = await nearestRes.json();
@@ -817,7 +889,7 @@
                 
                 const params = new URLSearchParams({ end_id: endIds, u_lat: geo.lat, u_lon: geo.lon });
                 
-                const response = await fetch(`http://127.0.0.1:8010/api/plan?${params.toString()}`);
+                const response = await fetch(`${API_BASE}/api/plan?${params.toString()}`);
                 if (!response.ok) {
                     throw new Error('Failed to fetch nearby buses');
                 }
@@ -1075,16 +1147,20 @@
 
             document.getElementById('track-bus-id').innerText = bus.liveBusId;
             document.getElementById('route-badge').innerText = bus.route;
+            document.getElementById('tracking-route-badge').innerText = bus.route;
             document.getElementById('next-stop-val').innerText = bus.next_stop;
             document.getElementById('eta-val').innerText = bus.eta;
+            document.getElementById('speed-val').innerHTML = '0 <span class="text-[11px] uppercase text-slate-400">km/h</span>';
+            document.getElementById('time-val').innerText = 'Pending';
+            setLiveStatus({ headline: 'Searching for server...', badge: 'Searching', tone: 'retry' });
             updateFullscreenInfo();
             
             showView('view-tracking');
             updateNavColors(null);
             initMap(currentActiveBus);
 
-            // Fetch live layout every 5 seconds
-            liveInterval = setInterval(updateLiveLocation, 5000);
+            // Poll the live engine every 3 seconds
+            liveInterval = setInterval(updateLiveLocation, 3000);
             updateLiveLocation(); // Immediately fetch once
         }
 
@@ -1123,11 +1199,15 @@
         }
 
         function updateTelemetryUI(lat, lng) {
-            document.getElementById('lat-val').innerText = lat.toFixed(4) + "° N";
-            document.getElementById('lng-val').innerText = lng.toFixed(4) + "° E";
+            const latSuffix = lat >= 0 ? 'N' : 'S';
+            const lngSuffix = lng >= 0 ? 'E' : 'W';
+            document.getElementById('lat-val').innerText = `${Math.abs(lat).toFixed(5)}° ${latSuffix}`;
+            document.getElementById('lng-val').innerText = `${Math.abs(lng).toFixed(5)}° ${lngSuffix}`;
             
             const now = new Date();
-            document.getElementById('update-time').innerText = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+            const displayTime = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+            document.getElementById('update-time').innerText = displayTime;
+            document.getElementById('time-val').innerText = displayTime;
             if (currentActiveBus) {
                 currentActiveBus.lat = lat;
                 currentActiveBus.lng = lng;
@@ -1139,7 +1219,7 @@
             if(!currentActiveBus || !map || !busMarker) return;
 
             try {
-                const response = await fetch(`http://127.0.0.1:8010/api/bus-location?bus_id=${currentActiveBus.liveBusId}`);
+                const response = await fetch(`${API_BASE}/api/bus-location?bus_id=${encodeURIComponent(currentActiveBus.liveBusId)}`);
                 if (!response.ok) {
                     if (Array.isArray(currentActiveBus.polyline) && currentActiveBus.polyline.length > 1) {
                         simulatedStepIndex = (simulatedStepIndex + 1) % currentActiveBus.polyline.length;
@@ -1148,24 +1228,32 @@
                         busMarker.setLatLng([currentActiveBus.lat, currentActiveBus.lng]);
                         map.panTo([currentActiveBus.lat, currentActiveBus.lng], {animate: true, duration: 1.2});
                         updateTelemetryUI(currentActiveBus.lat, currentActiveBus.lng);
+                        setLiveStatus({ headline: 'Reconnecting to engine...', badge: 'Fallback', tone: 'retry' });
                     }
                     return;
                 }
 
                 const data = await response.json();
-                if (typeof data.latitude !== 'number' || typeof data.longitude !== 'number') {
+                const latitude = Number(data.lat ?? data.latitude);
+                const longitude = Number(data.lng ?? data.longitude);
+                if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
                     console.log('Invalid location payload for bus:', currentActiveBus.id);
                     return;
                 }
                 
                 // Update active bus loc
-                currentActiveBus.lat = data.latitude;
-                currentActiveBus.lng = data.longitude;
+                currentActiveBus.lat = latitude;
+                currentActiveBus.lng = longitude;
+                currentActiveBus.route = data.route || currentActiveBus.route;
 
                 busMarker.setLatLng([currentActiveBus.lat, currentActiveBus.lng]);
                 map.panTo([currentActiveBus.lat, currentActiveBus.lng], {animate: true, duration: 1.5});
                 
                 updateTelemetryUI(currentActiveBus.lat, currentActiveBus.lng);
+                document.getElementById('route-badge').innerText = currentActiveBus.route;
+                document.getElementById('tracking-route-badge').innerText = currentActiveBus.route;
+                document.getElementById('speed-val').innerHTML = `${Math.round(Number(data.speed || 0))} <span class="text-[11px] uppercase text-slate-400">km/h</span>`;
+                setLiveStatus({ headline: data.isStale ? 'Engine stale...' : 'Live system synced', badge: data.isStale ? 'Stale' : 'Active', tone: data.isStale ? 'retry' : 'live' });
                 
                 // ETA Mock Update for demo
                 if(Math.random() > 0.8) {
@@ -1178,6 +1266,7 @@
                 }
             } catch (err) {
                 console.error("Error fetching live location:", err);
+                setLiveStatus({ headline: 'Reconnecting to engine...', badge: 'Retry', tone: 'retry' });
             }
         }
 
@@ -1423,7 +1512,7 @@
                 const randomDestination = allStopNames[Math.floor(Math.random() * Math.min(5, allStopNames.length))];
                 const endIds = stopNameToIds[randomDestination]?.join(',') || '';
                 
-                const response = await fetch(`http://127.0.0.1:8010/api/plan?end_id=${endIds}`);
+                const response = await fetch(`${API_BASE}/api/plan?end_id=${endIds}`);
                 if (!response.ok) throw new Error('Could not search for buses');
                 
                 const data = await response.json();
