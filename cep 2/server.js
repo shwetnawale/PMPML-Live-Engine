@@ -1,50 +1,61 @@
 const express = require('express');
-const { MongoClient } = require('mongodb');
 const cors = require('cors');
-
 const app = express();
-const PORT = 3000;
-
-// YOUR ATLAS CONNECTION
-// Add connectTimeoutMS to give the DNS more time to respond
-const uri = "mongodb+srv://shwet:saarthi123@chatgpt.lq5dqj9.mongodb.net/CitySaarthi?retryWrites=true&w=majority&connectTimeoutMS=30000";
-const client = new MongoClient(uri);
 
 app.use(cors());
 app.use(express.json());
 
-// API for Passenger Hub to get live data from Atlas
-app.get('/api/bus-location', async (req, res) => {
-    try {
-        const { bus_id } = req.query;
-        if (!bus_id) return res.status(400).json({ error: 'Missing bus_id' });
+// In-memory store for bus locations
+const busLocations = {};
 
-        const database = client.db('CitySaarthi');
-        const liveTracking = database.collection('live_tracking');
-        
-        // Find the record created by your Flutter Driver App
-        const data = await liveTracking.findOne({ bus_id: bus_id });
-
-        if (!data) return res.status(404).json({ error: 'Bus not found or offline' });
-
-        res.json({
-            bus_id: data.bus_id,
-            route: data.route,
-            lat: data.location.coordinates[1], // Latitude
-            lng: data.location.coordinates[0], // Longitude
-            speed: data.speed,
-            last_ping: data.last_ping
-        });
-    } catch (error) {
-        console.error("Fetch Error:", error);
-        res.status(500).json({ error: 'Server Error' });
+// POST endpoint for drivers to send location
+app.post('/api/bus-location', (req, res) => {
+    const { bus_id, latitude, longitude, timestamp } = req.body;
+    
+    if (!bus_id || latitude === undefined || longitude === undefined) {
+        return res.status(400).json({ error: 'Missing required fields' });
     }
+
+    // Update location
+    busLocations[bus_id] = {
+        bus_id,
+        latitude,
+        longitude,
+        timestamp: timestamp || new Date().toISOString(),
+        lastUpdated: Date.now()
+    };
+
+    console.log(`[Location Update] Bus: ${bus_id} | Lat: ${latitude} | Lng: ${longitude}`);
+    res.status(200).json({ success: true });
 });
 
-app.listen(PORT, async () => {
-    await client.connect();
-    console.log(`-----------------------------------------`);
-    console.log(`🚀 SERVER: http://localhost:${PORT}`);
-    console.log(`📦 DB: Connected to CitySaarthi Atlas`);
-    console.log(`-----------------------------------------`);
+// GET endpoint for passengers to retrieve location
+app.get('/api/bus-location', (req, res) => {
+    const { bus_id } = req.query;
+
+    if (!bus_id) {
+        return res.status(400).json({ error: 'Missing bus_id parameter' });
+    }
+
+    const location = busLocations[bus_id];
+
+    if (!location) {
+        return res.status(404).json({ error: 'Bus location not found' });
+    }
+
+    // Optionally check if data is stale (e.g., driver app stopped sending)
+    const isStale = Date.now() - location.lastUpdated > 30000; // 30 seconds
+
+    res.status(200).json({
+        bus_id: location.bus_id,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        timestamp: location.timestamp,
+        isStale
+    });
+});
+
+const PORT = 3000;
+app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
 });
