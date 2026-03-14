@@ -571,6 +571,51 @@
 
         document.addEventListener('fullscreenchange', refreshFullscreenState);
 
+        let suggestionOpenersBound = false;
+
+        function openInputSuggestions(inputElement) {
+            if (!inputElement || !inputElement.getAttribute('list')) return;
+
+            // Chrome supports showPicker on some input types and datalist contexts.
+            if (typeof inputElement.showPicker === 'function') {
+                try {
+                    inputElement.showPicker();
+                    return;
+                } catch (_err) {
+                    // Fallback to keyboard event below.
+                }
+            }
+
+            // Fallback: arrow-down opens datalist suggestions in most browsers.
+            const event = new KeyboardEvent('keydown', {
+                key: 'ArrowDown',
+                code: 'ArrowDown',
+                keyCode: 40,
+                which: 40,
+                bubbles: true,
+            });
+            inputElement.dispatchEvent(event);
+        }
+
+        function bindSuggestionOpeners() {
+            if (suggestionOpenersBound) return;
+
+            ['input-from', 'input-to', 'track-bus-number-input'].forEach((id) => {
+                const input = document.getElementById(id);
+                if (!input) return;
+
+                const showSuggestions = () => {
+                    // Slight delay ensures datalist options are attached before opening.
+                    setTimeout(() => openInputSuggestions(input), 20);
+                };
+
+                input.addEventListener('focus', showSuggestions);
+                input.addEventListener('click', showSuggestions);
+            });
+
+            suggestionOpenersBound = true;
+        }
+
         async function loadStopsData() {
             if (stopNames.length > 0) return;
 
@@ -627,6 +672,9 @@
                 } catch (busErr) {
                     console.warn('[WARN] Bus suggestions unavailable:', busErr.message || busErr);
                 }
+
+                // Ensure click/focus opens suggestions for all datalist fields.
+                bindSuggestionOpeners();
             } catch (err) {
                 console.error('[ERROR] Failed to load stops:', err);
                 throw err;

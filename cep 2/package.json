@@ -1,20 +1,13 @@
 {
   "name": "cep-2",
   "version": "1.0.0",
-  "description": "CitySaarthi broker service",
-  "main": "server.js",
+  "description": "Passenger frontend pages",
+  "main": "home.html",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "echo Open home.html in browser"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
-  "dependencies": {
-    "cors": "^2.8.6",
-    "dotenv": "^17.3.1",
-    "express": "^5.2.1",
-    "mongodb": "^6.18.0"
-  }
+  "type": "commonjs"
 }

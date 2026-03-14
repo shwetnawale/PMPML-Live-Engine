@@ -1,7 +1,5 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
@@ -47,8 +45,6 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 
 # --- DATA ENGINE ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 CEP2_DIR = os.path.join(BASE_DIR, "cep 2")
 
 def load_gtfs():
