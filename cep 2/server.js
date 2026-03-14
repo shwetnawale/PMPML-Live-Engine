@@ -6,7 +6,8 @@ const app = express();
 const PORT = 3000;
 
 // YOUR ATLAS CONNECTION
-const uri = "mongodb+srv://shwet:saarthi123@chatgpt.lq5dqj9.mongodb.net/CitySaarthi?retryWrites=true&w=majority";
+// Add connectTimeoutMS to give the DNS more time to respond
+const uri = "mongodb+srv://shwet:saarthi123@chatgpt.lq5dqj9.mongodb.net/CitySaarthi?retryWrites=true&w=majority&connectTimeoutMS=30000";
 const client = new MongoClient(uri);
 
 app.use(cors());
