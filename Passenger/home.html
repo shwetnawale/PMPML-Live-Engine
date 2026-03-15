@@ -317,6 +317,7 @@
           <div>
             <label for="stopSelect">Stop</label>
             <select id="stopSelect"><option value="">Loading stops...</option></select>
+            <div id="routeStopsHint" style="margin-top:6px;font-size:11px;font-weight:700;color:#6b7280;display:none;"></div>
           </div>
           <div>
             <label for="busSelect">Bus ID</label>
@@ -362,6 +363,7 @@
     const trackBtn = document.getElementById('trackBtn');
     const shareBtn = document.getElementById('shareBtn');
     const copyBtn = document.getElementById('copyBtn');
+    const routeStopsHint = document.getElementById('routeStopsHint');
     const selectorStatus = document.getElementById('selectorStatus');
     const trackStatus = document.getElementById('trackStatus');
     const mapBadge = document.getElementById('mapBadge');
@@ -487,6 +489,18 @@
       if (tone === 'warn') el.classList.add('warn');
     }
 
+    function setRouteStopsHint(message, tone) {
+      const text = String(message || '').trim();
+      if (!text) {
+        routeStopsHint.style.display = 'none';
+        routeStopsHint.textContent = '';
+        return;
+      }
+      routeStopsHint.style.display = 'block';
+      routeStopsHint.textContent = text;
+      routeStopsHint.style.color = tone === 'warn' ? '#b45309' : '#0f766e';
+    }
+
     function markLiveHeartbeat(mode) {
       const nowLabel = new Date().toLocaleTimeString();
       setStatus(trackStatus, `Live ${mode} update ${nowLabel}`, 'ok');
@@ -519,12 +533,21 @@
 
     async function populateStopsForRoute(routeValue) {
       const routeKey = String(routeValue || '').trim();
-      if (!routeKey) return false;
+      if (!routeKey) {
+        setRouteStopsHint('', 'ok');
+        return false;
+      }
       try {
         const response = await apiFetch(`/api/route-path?route=${encodeURIComponent(routeKey)}`, { cache: 'no-store' });
-        if (!response.ok) return false;
+        if (!response.ok) {
+          setRouteStopsHint('', 'ok');
+          return false;
+        }
         const payload = await response.json();
-        if (!Array.isArray(payload.points) || !payload.points.length) return false;
+        if (!Array.isArray(payload.points) || !payload.points.length) {
+          setRouteStopsHint('', 'ok');
+          return false;
+        }
 
         const byStop = new Map();
         for (const p of payload.points) {
@@ -542,11 +565,16 @@
         }
 
         const mappedStops = Array.from(byStop.values());
-        if (!mappedStops.length) return false;
+        if (!mappedStops.length) {
+          setRouteStopsHint('', 'ok');
+          return false;
+        }
 
         fillSelect(stopSelect, mappedStops, (s) => `${s.stop_name} (${s.stop_id})`, (s) => s.stop_id || s.stop_name);
+        setRouteStopsHint(`Route stops loaded: ${mappedStops.length}`, 'ok');
         return true;
       } catch {
+        setRouteStopsHint('', 'ok');
         return false;
       }
     }
@@ -586,6 +614,9 @@
 
       fillSelect(stopSelect, stops, (s) => `${s.stop_name} (${s.stop_id})`, (s) => s.stop_id || s.stop_name);
       fillSelect(busSelect, buses, (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
+      if (!routeId) {
+        setRouteStopsHint('', 'ok');
+      }
     }
 
     function findSelectedStop() {
