@@ -1,0 +1,17 @@
+Server1 + Passenger quick start
+
+1) Open terminal in this folder:
+	cd d:\CEP\PMPML-Live-Engine\Server1
+
+2) Install dependencies:
+	npm install
+
+3) Create env file:
+	copy .env.example .env
+	(then put your real Mongo URI in MONGO_URI)
+
+4) Start server:
+	npm start
+
+5) Open Passenger frontend:
+	http://localhost:3100/home.html

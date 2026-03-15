@@ -1,0 +1,20 @@
+{
+  "name": "pmpml-live-engine",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Root workspace package for the PMPML live engine backend.",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node server/server.js",
+    "server": "npm --prefix server start",
+    "frontend": "npm --prefix \"cep 2\" start",
+    "test": "echo \"No tests configured\""
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "mongodb": "^7.1.0"
+  }
+}

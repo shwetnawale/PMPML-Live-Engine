@@ -35,13 +35,15 @@
     </main>
 
     <script>
-        const DEFAULT_ENGINE_URL = 'https://1977-103-17-157-5.ngrok-free.app';
-
         const input = document.getElementById('engine-url');
         const state = document.getElementById('conn-state');
-        const stored = localStorage.getItem('CITYSAARTHI_ENGINE_URL');
+        const STORAGE_KEY = 'CITYSAARTHI_ENGINE_URL';
+        input.value = '';
 
-        input.value = stored || DEFAULT_ENGINE_URL;
+        const storedUrl = localStorage.getItem(STORAGE_KEY);
+        if (storedUrl) {
+            input.value = storedUrl;
+        }
 
         function normalizedUrl() {
             return (input.value || '').trim().replace(/\/$/, '');
@@ -56,7 +58,7 @@
             const engine = normalizedUrl();
             if (!engine.startsWith('https://')) {
                 setState('Status: use HTTPS ngrok URL', 'bad');
-                return;
+                return false;
             }
 
             setState('Status: checking broker...', 'idle');
@@ -64,26 +66,42 @@
                 const response = await fetch(`${engine}/health`);
                 if (!response.ok) throw new Error('offline');
                 setState('Status: broker connected', 'ok');
+                localStorage.setItem(STORAGE_KEY, engine);
+                return true;
             } catch (_err) {
                 setState('Status: broker not reachable', 'bad');
+                if (localStorage.getItem(STORAGE_KEY) === engine) {
+                    localStorage.removeItem(STORAGE_KEY);
+                }
+                return false;
             }
         }
 
-        document.getElementById('check-link').addEventListener('click', checkBroker);
-        document.getElementById('open-home').addEventListener('click', () => {
+        document.getElementById('check-link').addEventListener('click', async () => {
+            await checkBroker();
+        });
+
+        document.getElementById('open-home').addEventListener('click', async () => {
             const engine = normalizedUrl();
             if (!engine.startsWith('https://')) {
                 setState('Status: use HTTPS ngrok URL', 'bad');
                 return;
             }
 
-            localStorage.setItem('CITYSAARTHI_ENGINE_URL', engine);
+            const ok = await checkBroker();
+            if (!ok) {
+                return;
+            }
+
             window.location.href = `./cep%202/home.html?engine=${encodeURIComponent(engine)}`;
         });
 
-        if (input.value) {
-            checkBroker();
-        }
+        input.addEventListener('keydown', async (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                await checkBroker();
+            }
+        });
     </script>
 </body>
 </html>

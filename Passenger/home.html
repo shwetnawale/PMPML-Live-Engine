@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Passenger Live Tracker</title>
+  <style>
+    :root {
+      --ink: #102a43;
+      --ink-soft: #334e68;
+      --mist: #f0f4f8;
+      --card: #ffffff;
+      --accent: #ef8354;
+      --accent-deep: #d95d39;
+      --green: #2d6a4f;
+      --line: #d9e2ec;
+      --warning: #cc4b37;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 450px at -12% -18%, #fef3c7 0%, transparent 70%),
+        radial-gradient(1000px 500px at 112% 8%, #bee3db 0%, transparent 70%),
+        linear-gradient(165deg, #f8fbff 0%, #ecf3f9 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .shell {
+      max-width: 980px;
+      margin: 0 auto;
+      display: grid;
+      gap: 14px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #102a43 0%, #243b53 58%, #334e68 100%);
+      color: #fff;
+      border-radius: 20px;
+      padding: 18px;
+      box-shadow: 0 18px 40px rgba(16, 42, 67, 0.22);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 220px;
+      height: 220px;
+      right: -70px;
+      bottom: -80px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0.4px;
+    }
+
+    .hero p {
+      margin: 6px 0 0;
+      color: #d9e2ec;
+      font-size: 14px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: 1fr;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 6px 20px rgba(16, 42, 67, 0.06);
+    }
+
+    .title {
+      font-weight: 700;
+      margin: 0 0 10px;
+      font-size: 14px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    .stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    label {
+      font-size: 12px;
+      color: var(--ink-soft);
+      font-weight: 600;
+    }
+
+    select,
+    input,
+    button {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      padding: 11px 12px;
+      font-size: 14px;
+      background: #fff;
+      color: var(--ink);
+    }
+
+    select:focus,
+    input:focus {
+      outline: none;
+      border-color: #829ab1;
+      box-shadow: 0 0 0 3px rgba(130, 154, 177, 0.2);
+    }
+
+    .row {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr;
+    }
+
+    .btn {
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-deep) 100%);
+      color: #fff;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.18s ease, box-shadow 0.18s ease;
+      box-shadow: 0 8px 20px rgba(217, 93, 57, 0.25);
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 24px rgba(217, 93, 57, 0.32);
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .tile {
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      padding: 10px;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    }
+
+    .tile small {
+      display: block;
+      font-size: 11px;
+      color: var(--ink-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+
+    .tile strong {
+      font-size: 18px;
+      color: var(--ink);
+    }
+
+    .status {
+      margin-top: 12px;
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: #edf2f7;
+      font-size: 12px;
+      color: var(--ink-soft);
+      font-weight: 600;
+    }
+
+    .status.ok {
+      background: #e6fcf5;
+      color: var(--green);
+    }
+
+    .status.warn {
+      background: #fff5f5;
+      color: var(--warning);
+    }
+
+    .pulse {
+      animation: pulse 1.6s infinite;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.55; }
+      100% { opacity: 1; }
+    }
+
+    @media (min-width: 760px) {
+      .grid {
+        grid-template-columns: 1.1fr 1fr;
+      }
+
+      .row {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <h1>Passenger Live Tracker</h1>
+      <p>Select route, stop and bus, then track the selected bus location in near real-time.</p>
+    </section>
+
+    <div class="grid">
+      <section class="card">
+        <h2 class="title">Bus Selection</h2>
+        <div class="stack">
+          <div>
+            <label for="routeSelect">Route</label>
+            <select id="routeSelect">
+              <option value="">Loading routes...</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="stopSelect">Stop</label>
+            <select id="stopSelect">
+              <option value="">Loading stops...</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="busSelect">Bus ID</label>
+            <select id="busSelect">
+              <option value="">Loading buses...</option>
+            </select>
+          </div>
+
+          <button id="trackButton" class="btn">Start Tracking</button>
+        </div>
+
+        <div id="selectorStatus" class="status">Preparing selector data...</div>
+      </section>
+
+      <section class="card">
+        <h2 class="title">Live Telemetry</h2>
+        <div class="stats">
+          <div class="tile">
+            <small>Bus ID</small>
+            <strong id="outBus">--</strong>
+          </div>
+          <div class="tile">
+            <small>Route</small>
+            <strong id="outRoute">--</strong>
+          </div>
+          <div class="tile">
+            <small>Latitude</small>
+            <strong id="outLat">--</strong>
+          </div>
+          <div class="tile">
+            <small>Longitude</small>
+            <strong id="outLng">--</strong>
+          </div>
+          <div class="tile">
+            <small>Speed</small>
+            <strong id="outSpeed">0 km/h</strong>
+          </div>
+          <div class="tile">
+            <small>Last Ping</small>
+            <strong id="outPing">--</strong>
+          </div>
+        </div>
+
+        <div id="trackStatus" class="status">Not tracking yet.</div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const routeSelect = document.getElementById('routeSelect');
+    const stopSelect = document.getElementById('stopSelect');
+    const busSelect = document.getElementById('busSelect');
+    const trackButton = document.getElementById('trackButton');
+    const selectorStatus = document.getElementById('selectorStatus');
+    const trackStatus = document.getElementById('trackStatus');
+
+    const outBus = document.getElementById('outBus');
+    const outRoute = document.getElementById('outRoute');
+    const outLat = document.getElementById('outLat');
+    const outLng = document.getElementById('outLng');
+    const outSpeed = document.getElementById('outSpeed');
+    const outPing = document.getElementById('outPing');
+
+    let selectorPayload = { routes: [], stops: [], buses: [] };
+    let stream = null;
+    let pollTimer = null;
+
+    function fillSelect(select, items, labelOf, valueOf) {
+      const previous = select.value;
+      select.innerHTML = '<option value="">Select...</option>';
+      for (const item of items) {
+        const op = document.createElement('option');
+        op.textContent = labelOf(item);
+        op.value = valueOf(item);
+        select.appendChild(op);
+      }
+      if (previous && items.some((x) => String(valueOf(x)) === previous)) {
+        select.value = previous;
+      }
+    }
+
+    function setSelectorStatus(message, type = 'normal') {
+      selectorStatus.textContent = message;
+      selectorStatus.className = 'status';
+      if (type === 'ok') selectorStatus.classList.add('ok');
+      if (type === 'warn') selectorStatus.classList.add('warn');
+    }
+
+    function setTrackStatus(message, type = 'normal', pulse = false) {
+      trackStatus.textContent = message;
+      trackStatus.className = 'status';
+      if (type === 'ok') trackStatus.classList.add('ok');
+      if (type === 'warn') trackStatus.classList.add('warn');
+      if (pulse) trackStatus.classList.add('pulse');
+    }
+
+    function applyLiveData(data) {
+      outBus.textContent = data.bus_id || '--';
+      outRoute.textContent = data.route || data.route_id || '--';
+      outLat.textContent = data.lat != null ? Number(data.lat).toFixed(6) : '--';
+      outLng.textContent = data.lng != null ? Number(data.lng).toFixed(6) : '--';
+      outSpeed.textContent = `${Math.round(Number(data.speed || 0))} km/h`;
+      outPing.textContent = data.last_ping ? new Date(data.last_ping).toLocaleTimeString() : '--';
+    }
+
+    function stopAllTracking() {
+      if (stream) {
+        stream.close();
+        stream = null;
+      }
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    async function loadSelectorData() {
+      setSelectorStatus('Loading route, stop, and bus data from MongoDB...', 'normal');
+      const response = await fetch('/api/selector-data');
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to load selector data');
+      }
+
+      selectorPayload = payload;
+
+      fillSelect(routeSelect, payload.routes || [], (r) => r.route_label || r.route_id, (r) => r.route_id || r.route_label);
+      fillSelect(stopSelect, payload.stops || [], (s) => `${s.stop_name} (${s.stop_id})`, (s) => s.stop_id || s.stop_name);
+      fillSelect(busSelect, payload.buses || [], (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
+
+      setSelectorStatus(
+        `Loaded ${payload.routes.length} routes, ${payload.stops.length} stops, ${payload.buses.length} buses.`,
+        'ok'
+      );
+    }
+
+    function filterBusesByRoute() {
+      const routeId = routeSelect.value;
+      const allBuses = selectorPayload.buses || [];
+      const buses = routeId
+        ? allBuses.filter((b) => (b.route_id && b.route_id === routeId) || (b.route && String(b.route).includes(routeId)))
+        : allBuses;
+
+      fillSelect(busSelect, buses, (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
+    }
+
+    async function pollTracking(busId) {
+      try {
+        const response = await fetch(`/api/track?bus_id=${encodeURIComponent(busId)}`);
+        const payload = await response.json();
+        if (!response.ok) {
+          setTrackStatus(payload.error || 'Tracking temporarily unavailable', 'warn');
+          return;
+        }
+        applyLiveData(payload);
+        setTrackStatus('Tracking active (poll mode).', 'ok', true);
+      } catch (error) {
+        setTrackStatus(error.message || 'Tracking failed', 'warn');
+      }
+    }
+
+    function startTracking(busId) {
+      stopAllTracking();
+      setTrackStatus(`Connecting live stream for ${busId}...`, 'normal', true);
+
+      stream = new EventSource(`/api/track/stream?bus_id=${encodeURIComponent(busId)}`);
+
+      stream.onmessage = (event) => {
+        const packet = JSON.parse(event.data);
+        if (!packet.ok) {
+          setTrackStatus(packet.error || 'No live signal from bus yet', 'warn');
+          return;
+        }
+        applyLiveData(packet.data);
+        setTrackStatus('Live stream connected.', 'ok', true);
+      };
+
+      stream.onerror = () => {
+        if (stream) {
+          stream.close();
+          stream = null;
+        }
+        setTrackStatus('Live stream disconnected, switching to polling every 2s...', 'warn');
+        pollTracking(busId);
+        pollTimer = setInterval(() => pollTracking(busId), 2000);
+      };
+    }
+
+    trackButton.addEventListener('click', () => {
+      const busId = busSelect.value;
+      if (!busId) {
+        setTrackStatus('Select a bus ID first.', 'warn');
+        return;
+      }
+      startTracking(busId);
+    });
+
+    routeSelect.addEventListener('change', filterBusesByRoute);
+
+    loadSelectorData().catch((error) => {
+      setSelectorStatus(error.message || 'Unable to load selector data', 'warn');
+    });
+  </script>
+</body>
+</html>
