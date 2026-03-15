@@ -506,6 +506,54 @@
       }
     }
 
+    function normKey(value) {
+      return String(value || '').trim().toLowerCase();
+    }
+
+    function routeMatches(selectedRoute, candidateRoute) {
+      const a = normKey(selectedRoute);
+      const b = normKey(candidateRoute);
+      if (!a || !b) return false;
+      return a === b || a.includes(b) || b.includes(a);
+    }
+
+    function getFilteredStops(routeId) {
+      const allStops = selectorPayload.stops || [];
+      if (!routeId) return allStops;
+
+      const hasRouteMapping = allStops.some((s) => {
+        const direct = s.route_id || s.route || s.route_name || s.route_label;
+        const arrays = Array.isArray(s.route_ids) ? s.route_ids : (Array.isArray(s.routes) ? s.routes : []);
+        return Boolean(direct) || arrays.length > 0;
+      });
+
+      const filtered = allStops.filter((s) => {
+        const direct = s.route_id || s.route || s.route_name || s.route_label;
+        if (routeMatches(routeId, direct)) return true;
+
+        const arrays = Array.isArray(s.route_ids) ? s.route_ids : (Array.isArray(s.routes) ? s.routes : []);
+        return arrays.some((r) => routeMatches(routeId, r));
+      });
+
+      // If stops have no route mapping fields, keep all stops to avoid blank selector.
+      if (!filtered.length && !hasRouteMapping) {
+        return allStops;
+      }
+
+      return filtered;
+    }
+
+    function applyRouteFilters() {
+      const routeId = routeSelect.value;
+      const stops = getFilteredStops(routeId);
+      const buses = routeId
+        ? (selectorPayload.buses || []).filter((b) => routeMatches(routeId, b.route_id || b.route))
+        : (selectorPayload.buses || []);
+
+      fillSelect(stopSelect, stops, (s) => `${s.stop_name} (${s.stop_id})`, (s) => s.stop_id || s.stop_name);
+      fillSelect(busSelect, buses, (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
+    }
+
     function initMap() {
       map = L.map('liveMap').setView([18.5204, 73.8567], 12);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -654,8 +702,7 @@
       selectorPayload = payload;
 
       fillSelect(routeSelect, payload.routes || [], (r) => r.route_label || r.route_id, (r) => r.route_id || r.route_label);
-      fillSelect(stopSelect, payload.stops || [], (s) => `${s.stop_name} (${s.stop_id})`, (s) => s.stop_id || s.stop_name);
-      fillSelect(busSelect, payload.buses || [], (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
+      applyRouteFilters();
 
       setStatus(selectorStatus, `Loaded ${payload.routes.length} routes, ${payload.stops.length} stops, ${payload.buses.length} buses.`, 'ok');
     }
@@ -669,20 +716,14 @@
         const payload = await response.json();
         selectorPayload = payload;
         fillSelect(routeSelect, payload.routes || [], (r) => r.route_label || r.route_id, (r) => r.route_id || r.route_label);
-        fillSelect(stopSelect, payload.stops || [], (s) => `${s.stop_name} (${s.stop_id})`, (s) => s.stop_id || s.stop_name);
-        fillSelect(busSelect, payload.buses || [], (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
+        applyRouteFilters();
       } catch (_err) {
         // Silent refresh should never interrupt active tracking.
       }
     }
 
     function filterBuses() {
-      const routeId = routeSelect.value;
-      const buses = routeId
-        ? (selectorPayload.buses || []).filter((b) => (b.route_id && b.route_id === routeId) || (b.route && String(b.route).includes(routeId)))
-        : selectorPayload.buses || [];
-
-      fillSelect(busSelect, buses, (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
+      applyRouteFilters();
     }
 
     async function pollTrack(busId) {
@@ -778,7 +819,7 @@
     }
 
     routeSelect.addEventListener('change', () => {
-      filterBuses();
+      applyRouteFilters();
       highlightRoute(routeSelect.value);
     });
 
