@@ -472,6 +472,7 @@
     let selectorPayload = { routes: [], stops: [], buses: [] };
     let stream = null;
     let pollTimer = null;
+    let selectorRefreshTimer = null;
     let map = null;
     let busMarker = null;
     let busPulse = null;
@@ -640,7 +641,7 @@
 
     async function loadSelectorData() {
       setStatus(selectorStatus, 'Loading routes, stops, and buses...', '');
-      const response = await apiFetch('/api/selector-data');
+      const response = await apiFetch(`/api/selector-data?t=${Date.now()}`, { cache: 'no-store' });
       const ctype = (response.headers.get('content-type') || '').toLowerCase();
       if (!ctype.includes('application/json')) {
         throw new Error('Server URL is incorrect or unreachable. Use your ngrok https URL and tap Connect.');
@@ -657,6 +658,22 @@
       fillSelect(busSelect, payload.buses || [], (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
 
       setStatus(selectorStatus, `Loaded ${payload.routes.length} routes, ${payload.stops.length} stops, ${payload.buses.length} buses.`, 'ok');
+    }
+
+    async function refreshSelectorDataSilently() {
+      try {
+        const response = await apiFetch(`/api/selector-data?t=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const ctype = (response.headers.get('content-type') || '').toLowerCase();
+        if (!ctype.includes('application/json')) return;
+        const payload = await response.json();
+        selectorPayload = payload;
+        fillSelect(routeSelect, payload.routes || [], (r) => r.route_label || r.route_id, (r) => r.route_id || r.route_label);
+        fillSelect(stopSelect, payload.stops || [], (s) => `${s.stop_name} (${s.stop_id})`, (s) => s.stop_id || s.stop_name);
+        fillSelect(busSelect, payload.buses || [], (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
+      } catch (_err) {
+        // Silent refresh should never interrupt active tracking.
+      }
     }
 
     function filterBuses() {
@@ -806,6 +823,8 @@
         setServerDot('', 'Connecting...');
         await loadSelectorData();
         setServerDot('ok', API_BASE || 'localhost');
+        if (selectorRefreshTimer) clearInterval(selectorRefreshTimer);
+        selectorRefreshTimer = setInterval(refreshSelectorDataSilently, 10000);
       } catch (error) {
         setStatus(selectorStatus, error.message || 'Selector load failed — check Server URL above', 'warn');
         setServerDot('warn', 'Cannot reach server');

@@ -29,10 +29,6 @@ const PASSENGER_ROOT = path.join(__dirname, '..', 'Passenger');
 
 let mongoOnline = false;
 let mongoError = null;
-let cache = {
-	expiresAt: 0,
-	payload: null,
-};
 let routePathCache = {
 	expiresAt: 0,
 	index: null,
@@ -60,21 +56,25 @@ function asRouteLabel(route) {
 }
 
 function normalizeRouteDoc(route) {
+	const routeId = toTitle(route.route_id || route.routeId || route.code || route.route_no || route._id);
+	const shortName = toTitle(route.route_short_name || route.routeShortName || route.short_name || route.shortName || route.route_name || route.routeName || route.name || routeId);
+	const longName = toTitle(route.route_long_name || route.routeLongName || route.long_name || route.longName || route.description || '');
+
 	return {
-		route_id: toTitle(route.route_id || route._id),
-		route_short_name: toTitle(route.route_short_name),
-		route_long_name: toTitle(route.route_long_name),
-		route_label: asRouteLabel(route),
+		route_id: routeId,
+		route_short_name: shortName,
+		route_long_name: longName,
+		route_label: asRouteLabel({ route_id: routeId, route_short_name: shortName, route_long_name: longName }),
 	};
 }
 
 function normalizeStopDoc(stop) {
 	return {
-		stop_id: toTitle(stop.stop_id || stop._id),
-		stop_name: toTitle(stop.stop_name),
-		stop_lat: numberOrNull(stop.stop_lat),
-		stop_lon: numberOrNull(stop.stop_lon),
-		route_id: toTitle(stop.route_id),
+		stop_id: toTitle(stop.stop_id || stop.stopId || stop.id || stop._id),
+		stop_name: toTitle(stop.stop_name || stop.stopName || stop.name),
+		stop_lat: numberOrNull(stop.stop_lat ?? stop.stopLat ?? stop.lat ?? stop.latitude),
+		stop_lon: numberOrNull(stop.stop_lon ?? stop.stopLon ?? stop.lon ?? stop.lng ?? stop.longitude),
+		route_id: toTitle(stop.route_id || stop.routeId || stop.route),
 	};
 }
 
@@ -105,9 +105,9 @@ function normalizeLiveDoc(live) {
 	const speed = numberOrNull(live.speed ?? live.Speed ?? live.velocity) || 0;
 
 	return {
-		bus_id: toTitle(live.bus_id),
-		route: toTitle(live.route),
-		route_id: toTitle(live.route_id),
+		bus_id: toTitle(live.bus_id || live.busId || live.bus_no || live.busNo || live.vehicle_no || live.vehicleNo || live.bus || live.id),
+		route: toTitle(live.route || live.route_name || live.routeName || live.line || live.line_name),
+		route_id: toTitle(live.route_id || live.routeId || live.route || live.route_name || live.routeName),
 		current_stop: toTitle(live.current_stop),
 		next_stop: toTitle(live.next_stop),
 		lat,
@@ -436,39 +436,23 @@ function db() {
 }
 
 async function getSelectorData() {
-	const now = Date.now();
-	if (cache.payload && now < cache.expiresAt) {
-		return cache.payload;
-	}
-
 	const routesRaw = await db()
 		.collection(ROUTES_COLLECTION)
-		.find({}, { projection: { _id: 0, route_id: 1, route_short_name: 1, route_long_name: 1 } })
+		.find({}, { projection: { _id: 0 } })
 		.limit(5000)
 		.toArray();
 
 	const stopsRaw = await db()
 		.collection(STOPS_COLLECTION)
-		.find({}, { projection: { _id: 0, stop_id: 1, stop_name: 1, stop_lat: 1, stop_lon: 1, route_id: 1 } })
+		.find({}, { projection: { _id: 0 } })
 		.limit(12000)
 		.toArray();
 
-	const busesRaw = await db()
+	const liveRaw = await db()
 		.collection(LIVE_COLLECTION)
-		.aggregate([
-			{ $match: { bus_id: { $type: 'string', $ne: '' } } },
-			{ $sort: { last_ping: -1 } },
-			{
-				$group: {
-					_id: '$bus_id',
-					route: { $first: '$route' },
-					route_id: { $first: '$route_id' },
-					last_ping: { $first: '$last_ping' },
-				},
-			},
-			{ $project: { _id: 0, bus_id: '$_id', route: 1, route_id: 1, last_ping: 1 } },
-			{ $limit: 3000 },
-		])
+		.find({}, { projection: { _id: 0 } })
+		.sort({ _id: -1 })
+		.limit(8000)
 		.toArray();
 
 	const routes = routesRaw.map(normalizeRouteDoc).sort((a, b) => a.route_label.localeCompare(b.route_label));
@@ -477,15 +461,22 @@ async function getSelectorData() {
 		.filter((s) => s.stop_name)
 		.sort((a, b) => a.stop_name.localeCompare(b.stop_name));
 	let resolvedRoutes = routes;
-	const buses = busesRaw
-		.map((b) => ({
-			bus_id: toTitle(b.bus_id),
-			route: toTitle(b.route),
-			route_id: toTitle(b.route_id) || toTitle(b.route),
-			last_ping: b.last_ping || null,
-		}))
-		.filter((b) => b.bus_id)
-		.sort((a, b) => a.bus_id.localeCompare(b.bus_id));
+
+	const busesById = new Map();
+	for (const raw of liveRaw) {
+		const normalized = normalizeLiveDoc(raw);
+		if (!normalized.bus_id) continue;
+		if (!busesById.has(normalized.bus_id)) {
+			busesById.set(normalized.bus_id, {
+				bus_id: normalized.bus_id,
+				route: normalized.route,
+				route_id: normalized.route_id || normalized.route,
+				last_ping: normalized.last_ping || null,
+			});
+		}
+	}
+
+	const buses = Array.from(busesById.values()).sort((a, b) => a.bus_id.localeCompare(b.bus_id));
 
 	if (!resolvedRoutes.length) {
 		const liveRoutes = buses
@@ -517,11 +508,6 @@ async function getSelectorData() {
 		stops,
 		buses,
 		updated_at: new Date().toISOString(),
-	};
-
-	cache = {
-		payload,
-		expiresAt: now + 20_000,
 	};
 
 	return payload;
@@ -561,6 +547,9 @@ app.get('/api/selector-data', async (_req, res) => {
 		if (!mongoOnline) {
 			return res.status(503).json({ error: 'MongoDB is offline', routes: [], stops: [], buses: [] });
 		}
+		res.setHeader('Cache-Control', 'no-store');
+		res.setHeader('Pragma', 'no-cache');
+		res.setHeader('Expires', '0');
 		const payload = await getSelectorData();
 		return res.status(200).json(payload);
 	} catch (error) {
