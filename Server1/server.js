@@ -418,6 +418,17 @@ function resolveRoutePath(index, routeInput) {
 	return best;
 }
 
+function uniqueRoutePathEntries(index) {
+	const byRouteId = new Map();
+	for (const value of index.values()) {
+		if (!value || !value.route_id) continue;
+		if (!byRouteId.has(value.route_id)) {
+			byRouteId.set(value.route_id, value);
+		}
+	}
+	return Array.from(byRouteId.values());
+}
+
 async function connectMongo() {
 	try {
 		await mongoClient.connect();
@@ -677,6 +688,84 @@ app.get('/api/route-path', (req, res) => {
 	} catch (error) {
 		console.error('route-path error:', error);
 		return res.status(500).json({ error: 'Unable to load route path' });
+	}
+});
+
+app.get('/api/stop-routes', async (req, res) => {
+	try {
+		const stopIdInput = toTitle(req.query.stop_id);
+		const stopNameInput = toTitle(req.query.stop_name);
+		if (!stopIdInput && !stopNameInput) {
+			return res.status(400).json({ error: 'stop_id or stop_name is required' });
+		}
+
+		const targetStopId = normalizeKey(stopIdInput);
+		const targetStopName = normalizeKey(stopNameInput);
+
+		const index = getRoutePathIndex();
+		const uniqueRoutes = uniqueRoutePathEntries(index);
+		const matchedRoutes = [];
+
+		for (const route of uniqueRoutes) {
+			const points = Array.isArray(route.points) ? route.points : [];
+			const hit = points.find((p) => {
+				const pid = normalizeKey(p.stop_id);
+				const pname = normalizeKey(p.stop_name);
+				const idMatch = targetStopId && pid && targetStopId === pid;
+				const nameMatch = targetStopName && pname && (targetStopName === pname || pname.includes(targetStopName));
+				return idMatch || nameMatch;
+			});
+			if (hit) {
+				matchedRoutes.push({
+					route_id: route.route_id,
+					route_label: route.route_label || route.route_id,
+					route_short_name: route.route_short_name || '',
+					route_long_name: route.route_long_name || '',
+					matched_stop_id: hit.stop_id || '',
+					matched_stop_name: hit.stop_name || '',
+				});
+			}
+		}
+
+		const routeKeys = new Set(matchedRoutes.map((r) => normalizeKey(r.route_id || r.route_label)).filter(Boolean));
+		let buses = [];
+
+		if (mongoOnline && routeKeys.size) {
+			const liveRaw = await db()
+				.collection(LIVE_COLLECTION)
+				.find({}, { projection: { _id: 0 } })
+				.sort({ _id: -1 })
+				.limit(8000)
+				.toArray();
+
+			const busesById = new Map();
+			for (const raw of liveRaw) {
+				const normalized = normalizeLiveDoc(raw);
+				if (!normalized.bus_id) continue;
+				const liveRouteKey = normalizeKey(normalized.route_id || normalized.route);
+				if (!liveRouteKey || !Array.from(routeKeys).some((rk) => rk === liveRouteKey || rk.includes(liveRouteKey) || liveRouteKey.includes(rk))) continue;
+				if (!busesById.has(normalized.bus_id)) {
+					busesById.set(normalized.bus_id, {
+						bus_id: normalized.bus_id,
+						route: normalized.route,
+						route_id: normalized.route_id || normalized.route,
+						last_ping: normalized.last_ping || null,
+					});
+				}
+			}
+			buses = Array.from(busesById.values()).sort((a, b) => a.bus_id.localeCompare(b.bus_id));
+		}
+
+		return res.status(200).json({
+			stop_id: stopIdInput || null,
+			stop_name: stopNameInput || null,
+			routes: matchedRoutes,
+			buses,
+			updated_at: new Date().toISOString(),
+		});
+	} catch (error) {
+		console.error('stop-routes error:', error);
+		return res.status(500).json({ error: 'Unable to resolve routes for selected stop', routes: [], buses: [] });
 	}
 });
 

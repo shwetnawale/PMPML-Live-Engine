@@ -517,6 +517,40 @@
       return a === b || a.includes(b) || b.includes(a);
     }
 
+    async function populateStopsForRoute(routeValue) {
+      const routeKey = String(routeValue || '').trim();
+      if (!routeKey) return false;
+      try {
+        const response = await apiFetch(`/api/route-path?route=${encodeURIComponent(routeKey)}`, { cache: 'no-store' });
+        if (!response.ok) return false;
+        const payload = await response.json();
+        if (!Array.isArray(payload.points) || !payload.points.length) return false;
+
+        const byStop = new Map();
+        for (const p of payload.points) {
+          const stopId = String(p.stop_id || '').trim();
+          const stopName = String(p.stop_name || '').trim();
+          if (!stopId && !stopName) continue;
+          const key = stopId || stopName;
+          if (!byStop.has(key)) {
+            byStop.set(key, {
+              stop_id: stopId || stopName,
+              stop_name: stopName || stopId,
+              route_id: routeKey,
+            });
+          }
+        }
+
+        const mappedStops = Array.from(byStop.values());
+        if (!mappedStops.length) return false;
+
+        fillSelect(stopSelect, mappedStops, (s) => `${s.stop_name} (${s.stop_id})`, (s) => s.stop_id || s.stop_name);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
     function getFilteredStops(routeId) {
       const allStops = selectorPayload.stops || [];
       if (!routeId) return allStops;
@@ -576,13 +610,61 @@
       return [...new Set(hints)];
     }
 
-    function applyStopDrivenFilters() {
+    async function fetchFallbackRouteHintsForStop(stop) {
+      if (!stop) return { routeHints: [], buses: [] };
+      const stopId = String(stop.stop_id || '').trim();
+      const stopName = String(stop.stop_name || '').trim();
+      if (!stopId && !stopName) return { routeHints: [], buses: [] };
+
+      const query = new URLSearchParams();
+      if (stopId) query.set('stop_id', stopId);
+      if (stopName) query.set('stop_name', stopName);
+
+      try {
+        const response = await apiFetch(`/api/stop-routes?${query.toString()}`, { cache: 'no-store' });
+        if (!response.ok) return { routeHints: [], buses: [] };
+        const payload = await response.json();
+        const routeHints = (payload.routes || []).map((r) => r.route_id || r.route_label).filter(Boolean);
+        const buses = Array.isArray(payload.buses) ? payload.buses : [];
+        return { routeHints: [...new Set(routeHints)], buses };
+      } catch {
+        return { routeHints: [], buses: [] };
+      }
+    }
+
+    async function applyStopDrivenFilters() {
       const stop = findSelectedStop();
       if (!stop) return;
 
-      const routeHints = getRouteHintsFromStop(stop);
+      let routeHints = getRouteHintsFromStop(stop);
+      let fallbackBuses = [];
+
       if (!routeHints.length) {
-        setStatus(selectorStatus, 'Stop selected. This stop has no route mapping in DB, showing all routes.', 'warn');
+        const fallback = await fetchFallbackRouteHintsForStop(stop);
+        routeHints = fallback.routeHints;
+        fallbackBuses = fallback.buses;
+      }
+
+      if (!routeHints.length) {
+        const liveBuses = selectorPayload.buses || [];
+        fillSelect(busSelect, liveBuses, (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
+        if (!busSelect.value) {
+          const firstBus = firstNonEmptySelectValue(busSelect);
+          if (firstBus) busSelect.value = firstBus;
+        }
+
+        if (busSelect.value) {
+          syncRouteFromSelectedBus();
+          if (routeSelect.value) {
+            await populateStopsForRoute(routeSelect.value);
+            applyRouteFilters();
+            highlightRoute(routeSelect.value);
+          }
+          setStatus(selectorStatus, 'Stop not mapped. Using nearest live route/bus fallback.', 'warn');
+          return;
+        }
+
+        setStatus(selectorStatus, 'Stop selected, but no mapped routes or live buses found.', 'warn');
         return;
       }
 
@@ -606,15 +688,15 @@
       }
 
       const routeId = routeSelect.value;
+      const busSource = (fallbackBuses && fallbackBuses.length) ? fallbackBuses : (selectorPayload.buses || []);
       const buses = routeId
-        ? (selectorPayload.buses || []).filter((b) => routeMatches(routeId, b.route_id || b.route))
-        : (selectorPayload.buses || []).filter((b) =>
-            routeHints.some((hint) => routeMatches(hint, b.route_id || b.route))
-          );
+        ? busSource.filter((b) => routeMatches(routeId, b.route_id || b.route))
+        : busSource.filter((b) => routeHints.some((hint) => routeMatches(hint, b.route_id || b.route)));
 
       fillSelect(busSelect, buses, (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
 
       if (routeId) {
+        await populateStopsForRoute(routeId);
         highlightRoute(routeId);
       }
 
@@ -645,7 +727,7 @@
 
     function autoResolveSelectionForTracking() {
       if (stopSelect.value) {
-        applyStopDrivenFilters();
+        // async path handled by caller before tracking starts
       }
 
       if (!routeSelect.value) {
@@ -667,6 +749,30 @@
 
       if (!routeSelect.value && busSelect.value) {
         syncRouteFromSelectedBus();
+      }
+    }
+
+    async function resolveSelectionForTracking() {
+      if (stopSelect.value) {
+        await applyStopDrivenFilters();
+      }
+
+      autoResolveSelectionForTracking();
+
+      if (routeSelect.value && !stopSelect.value) {
+        applyRouteFilters();
+      }
+
+      if (!busSelect.value) {
+        const anyLiveBus = firstNonEmptySelectValue(busSelect);
+        if (anyLiveBus) {
+          busSelect.value = anyLiveBus;
+          syncRouteFromSelectedBus();
+        }
+      }
+
+      if (routeSelect.value) {
+        await populateStopsForRoute(routeSelect.value);
       }
     }
 
@@ -934,18 +1040,27 @@
       });
     }
 
-    routeSelect.addEventListener('change', () => {
+    routeSelect.addEventListener('change', async () => {
       applyRouteFilters();
+      await populateStopsForRoute(routeSelect.value);
       highlightRoute(routeSelect.value);
     });
 
-    stopSelect.addEventListener('change', () => {
-      applyStopDrivenFilters();
+    stopSelect.addEventListener('change', async () => {
+      await applyStopDrivenFilters();
       autoResolveSelectionForTracking();
     });
 
-    trackBtn.addEventListener('click', () => {
-      autoResolveSelectionForTracking();
+    busSelect.addEventListener('change', () => {
+      syncRouteFromSelectedBus();
+      if (routeSelect.value) {
+        applyRouteFilters();
+        highlightRoute(routeSelect.value);
+      }
+    });
+
+    trackBtn.addEventListener('click', async () => {
+      await resolveSelectionForTracking();
       const busId = busSelect.value;
       if (!busId) {
         setStatus(trackStatus, 'No live bus found for selected stop yet. Try another stop or wait for live update.', 'warn');
