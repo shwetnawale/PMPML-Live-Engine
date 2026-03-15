@@ -1,3 +1,0 @@
-npm install
-node server.js
-npx ngrok http 3000

@@ -229,6 +229,58 @@
       font-weight: 600;
     }
 
+    .server-bar {
+      background: #fff8e7;
+      border: 1px solid #f4d35e;
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .server-bar label {
+      font-size: 11px;
+      font-weight: 800;
+      color: #7d5a00;
+      white-space: nowrap;
+    }
+
+    .server-bar input {
+      flex: 1;
+      min-width: 160px;
+      border: 1px solid #f4d35e;
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 13px;
+      background: #fffff8;
+    }
+
+    .server-bar button {
+      width: auto;
+      padding: 7px 14px;
+      font-size: 12px;
+      font-weight: 800;
+      border-radius: 8px;
+      border: none;
+      background: #f4d35e;
+      color: #5a3e00;
+      cursor: pointer;
+    }
+
+    .server-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #ccc;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    .server-dot.ok { background: #2a9d8f; }
+    .server-dot.warn { background: #d1495b; }
+
     @media (min-width: 950px) {
       .layout {
         grid-template-columns: 370px 1fr;
@@ -243,8 +295,16 @@
   <div class="app">
     <section class="hero">
       <h1 class="hero-title"><i class="fa-solid fa-bus-simple"></i> Passenger Live Hub</h1>
-      <p class="hero-text">Cep 2 style tracking UI, connected to your standalone Server1 APIs for routes, stops, and live bus location.</p>
+      <p class="hero-text">Live bus tracking for PMPML &mdash; routes, stops, and real-time location.</p>
     </section>
+
+    <div class="server-bar" id="serverBar">
+      <span class="server-dot" id="serverDot"></span>
+      <label for="serverInput"><i class="fa-solid fa-server"></i> Server URL</label>
+      <input id="serverInput" type="url" placeholder="http://localhost:3100" />
+      <button id="serverSaveBtn">Connect</button>
+      <span id="serverLabel" style="font-size:11px;font-weight:700;color:#7d5a00;"></span>
+    </div>
 
     <div class="layout">
       <section class="card">
@@ -313,18 +373,69 @@
     const outLng = document.getElementById('outLng');
     const outPing = document.getElementById('outPing');
 
+    // ── API base URL ──────────────────────────────────────────────────────────
+    //  Priority: ?server= param → localStorage → auto-detect localhost
+    const _params = new URLSearchParams(window.location.search);
+    let API_BASE = (() => {
+      const fromParam = (_params.get('server') || '').replace(/\/$/, '');
+      if (fromParam) { localStorage.setItem('pmpml_server', fromParam); return fromParam; }
+      const fromStore = (localStorage.getItem('pmpml_server') || '').replace(/\/$/, '');
+      if (fromStore) return fromStore;
+      const h = window.location.hostname;
+      if (h === 'localhost' || h === '127.0.0.1') return '';
+      return '';
+    })();
+
+    const serverInput = document.getElementById('serverInput');
+    const serverSaveBtn = document.getElementById('serverSaveBtn');
+    const serverDot = document.getElementById('serverDot');
+    const serverLabel = document.getElementById('serverLabel');
+
+    function setServerDot(state, text) {
+      serverDot.className = 'server-dot' + (state === 'ok' ? ' ok' : state === 'warn' ? ' warn' : '');
+      serverLabel.textContent = text || '';
+    }
+
+    function updateServerInput() {
+      const h = window.location.hostname;
+      const isLocal = h === 'localhost' || h === '127.0.0.1';
+      serverInput.value = API_BASE || (isLocal ? 'http://localhost:3100' : '');
+      document.getElementById('serverBar').style.display =
+        (isLocal && !API_BASE) ? 'none' : 'flex';
+    }
+
+    serverSaveBtn.addEventListener('click', () => {
+      const val = serverInput.value.trim().replace(/\/$/, '');
+      API_BASE = val;
+      if (val) localStorage.setItem('pmpml_server', val);
+      else localStorage.removeItem('pmpml_server');
+      setServerDot('', 'Saved — reloading...');
+      setTimeout(() => location.reload(), 400);
+    });
+
+    function apiUrl(path) { return API_BASE + path; }
+    // ─────────────────────────────────────────────────────────────────────────
+
     let selectorPayload = { routes: [], stops: [], buses: [] };
     let stream = null;
     let pollTimer = null;
     let map = null;
     let busMarker = null;
     let busPulse = null;
+    let routeLine = null;
+    let routeEndpoints = null;
+    let highlightedRouteKey = '';
 
     function setStatus(el, message, tone) {
       el.textContent = message;
       el.className = 'status-chip';
       if (tone === 'ok') el.classList.add('ok');
       if (tone === 'warn') el.classList.add('warn');
+    }
+
+    function markLiveHeartbeat(mode) {
+      const nowLabel = new Date().toLocaleTimeString();
+      setStatus(trackStatus, `Live ${mode} update ${nowLabel}`, 'ok');
     }
 
     function fillSelect(select, items, labelOf, valueOf) {
@@ -372,6 +483,78 @@
       mapBadge.textContent = route ? `Route ${route}` : 'Route --';
     }
 
+    function clearRouteHighlight() {
+      if (!map) return;
+      if (routeLine) {
+        map.removeLayer(routeLine);
+        routeLine = null;
+      }
+      if (routeEndpoints) {
+        map.removeLayer(routeEndpoints);
+        routeEndpoints = null;
+      }
+      highlightedRouteKey = '';
+    }
+
+    async function highlightRoute(routeValue) {
+      if (!routeValue) {
+        clearRouteHighlight();
+        return;
+      }
+
+      const routeKey = String(routeValue).trim();
+      if (!routeKey || highlightedRouteKey === routeKey) return;
+
+      try {
+        const response = await fetch(apiUrl(`/api/route-path?route=${encodeURIComponent(routeKey)}`));
+        const payload = await response.json();
+        if (!response.ok || !Array.isArray(payload.points) || payload.points.length < 2) {
+          clearRouteHighlight();
+          return;
+        }
+
+        const latLngs = payload.points
+          .map((p) => [Number(p.lat), Number(p.lng)])
+          .filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+
+        if (latLngs.length < 2) {
+          clearRouteHighlight();
+          return;
+        }
+
+        if (!map) initMap();
+        clearRouteHighlight();
+
+        routeLine = L.polyline(latLngs, {
+          color: '#e76f51',
+          weight: 5,
+          opacity: 0.86,
+        }).addTo(map);
+
+        const first = payload.points[0];
+        const last = payload.points[payload.points.length - 1];
+        routeEndpoints = L.layerGroup([
+          L.circleMarker([first.lat, first.lng], {
+            radius: 5,
+            color: '#102a43',
+            fillColor: '#102a43',
+            fillOpacity: 1,
+          }).bindTooltip(`Start: ${first.stop_name || first.stop_id || 'First Stop'}`),
+          L.circleMarker([last.lat, last.lng], {
+            radius: 5,
+            color: '#2a9d8f',
+            fillColor: '#2a9d8f',
+            fillOpacity: 1,
+          }).bindTooltip(`End: ${last.stop_name || last.stop_id || 'Last Stop'}`),
+        ]).addTo(map);
+
+        highlightedRouteKey = routeKey;
+        map.fitBounds(routeLine.getBounds(), { padding: [24, 24] });
+      } catch (_error) {
+        clearRouteHighlight();
+      }
+    }
+
     function stopTracking() {
       if (stream) {
         stream.close();
@@ -384,19 +567,27 @@
     }
 
     function applyLiveData(data) {
+      const liveRoute = data.route || data.route_id || '';
       outBus.textContent = data.bus_id || '--';
-      outRoute.textContent = data.route || data.route_id || '--';
+      outRoute.textContent = liveRoute || '--';
       outSpeed.textContent = `${Math.round(Number(data.speed || 0))} km/h`;
       outLat.textContent = data.lat != null ? Number(data.lat).toFixed(6) : '--';
       outLng.textContent = data.lng != null ? Number(data.lng).toFixed(6) : '--';
       outPing.textContent = data.last_ping ? new Date(data.last_ping).toLocaleTimeString() : '--';
 
       updateMap(Number(data.lat), Number(data.lng), outRoute.textContent);
+
+      if (!routeSelect.value && liveRoute) {
+        routeSelect.value = liveRoute;
+      }
+      if (liveRoute) {
+        highlightRoute(liveRoute);
+      }
     }
 
     async function loadSelectorData() {
       setStatus(selectorStatus, 'Loading routes, stops, and buses...', '');
-      const response = await fetch('/api/selector-data');
+      const response = await fetch(apiUrl('/api/selector-data'));
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(payload.error || 'Unable to load selector data');
@@ -422,24 +613,40 @@
 
     async function pollTrack(busId) {
       try {
-        const response = await fetch(`/api/track?bus_id=${encodeURIComponent(busId)}`);
+        const response = await fetch(apiUrl(`/api/track?bus_id=${encodeURIComponent(busId)}`));
         const payload = await response.json();
         if (!response.ok) {
           setStatus(trackStatus, payload.error || 'Tracking unavailable', 'warn');
           return;
         }
         applyLiveData(payload);
-        setStatus(trackStatus, 'Tracking active (poll mode)', 'ok');
+        if (!stream) {
+          markLiveHeartbeat('poll');
+        }
       } catch (error) {
         setStatus(trackStatus, error.message || 'Tracking failed', 'warn');
       }
     }
 
+    function startPolling(busId) {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+      }
+      pollTrack(busId);
+      pollTimer = setInterval(() => pollTrack(busId), 2000);
+    }
+
     function startTracking(busId) {
       stopTracking();
       setStatus(trackStatus, `Connecting ${busId} stream...`, '');
+      startPolling(busId);
 
-      stream = new EventSource(`/api/track/stream?bus_id=${encodeURIComponent(busId)}`);
+      const selectedRoute = routeSelect.value;
+      if (selectedRoute) {
+        highlightRoute(selectedRoute);
+      }
+
+      stream = new EventSource(apiUrl(`/api/track/stream?bus_id=${encodeURIComponent(busId)}`));
       stream.onmessage = (event) => {
         const packet = JSON.parse(event.data);
         if (!packet.ok) {
@@ -447,7 +654,7 @@
           return;
         }
         applyLiveData(packet.data);
-        setStatus(trackStatus, 'Live stream connected', 'ok');
+        markLiveHeartbeat('stream');
       };
 
       stream.onerror = () => {
@@ -455,9 +662,7 @@
           stream.close();
           stream = null;
         }
-        setStatus(trackStatus, 'Stream disconnected, fallback polling every 2s', 'warn');
-        pollTrack(busId);
-        pollTimer = setInterval(() => pollTrack(busId), 2000);
+        setStatus(trackStatus, 'Stream disconnected, polling every 2s', 'warn');
       };
     }
 
@@ -493,7 +698,10 @@
       });
     }
 
-    routeSelect.addEventListener('change', filterBuses);
+    routeSelect.addEventListener('change', () => {
+      filterBuses();
+      highlightRoute(routeSelect.value);
+    });
 
     trackBtn.addEventListener('click', () => {
       const busId = busSelect.value;
@@ -522,14 +730,19 @@
     });
 
     (async () => {
+      updateServerInput();
       initMap();
       try {
+        setServerDot('', 'Connecting...');
         await loadSelectorData();
+        setServerDot('ok', API_BASE || 'localhost');
       } catch (error) {
-        setStatus(selectorStatus, error.message || 'Selector load failed', 'warn');
+        setStatus(selectorStatus, error.message || 'Selector load failed — check Server URL above', 'warn');
+        setServerDot('warn', 'Cannot reach server');
+        document.getElementById('serverBar').style.display = 'flex';
       }
 
-      const busFromUrl = new URLSearchParams(window.location.search).get('bus');
+      const busFromUrl = _params.get('bus');
       if (busFromUrl) {
         busSelect.value = busFromUrl;
         startTracking(busFromUrl);

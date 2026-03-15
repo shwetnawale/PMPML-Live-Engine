@@ -16,6 +16,8 @@ const STOPS_COLLECTION = process.env.MONGO_COLLECTION_STOPS || 'stops';
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
 const GTFS_STOPS_PATH = path.join(__dirname, '..', 'gtfs_data', 'stops.txt');
 const GTFS_ROUTES_PATH = path.join(__dirname, '..', 'gtfs_data', 'routes.txt');
+const GTFS_TRIPS_PATH = path.join(__dirname, '..', 'gtfs_data', 'trips.txt');
+const GTFS_STOP_TIMES_PATH = path.join(__dirname, '..', 'gtfs_data', 'stop_times.txt');
 
 if (!MONGO_URI) {
 	console.error('MONGO_URI is missing. Create Server1/.env from Server1/.env.example');
@@ -30,6 +32,10 @@ let mongoError = null;
 let cache = {
 	expiresAt: 0,
 	payload: null,
+};
+let routePathCache = {
+	expiresAt: 0,
+	index: null,
 };
 
 app.use(cors({ origin: ALLOWED_ORIGIN === '*' ? true : ALLOWED_ORIGIN }));
@@ -73,13 +79,30 @@ function normalizeStopDoc(stop) {
 }
 
 function normalizeLiveDoc(live) {
-	const coordinates =
-		live && live.location && Array.isArray(live.location.coordinates)
-			? live.location.coordinates
-			: [];
+	// Strategy 1: GeoJSON location.coordinates [lng, lat]
+	let lat = null;
+	let lng = null;
 
-	const lng = numberOrNull(coordinates[0]);
-	const lat = numberOrNull(coordinates[1]);
+	if (live && live.location && Array.isArray(live.location.coordinates) && live.location.coordinates.length >= 2) {
+		lng = numberOrNull(live.location.coordinates[0]);
+		lat = numberOrNull(live.location.coordinates[1]);
+	}
+
+	// Strategy 2: top-level lat/lng or latitude/longitude fields
+	if (lat == null || lng == null) {
+		const rawLat = live.lat ?? live.latitude ?? live.Lat ?? null;
+		const rawLng = live.lng ?? live.lon ?? live.longitude ?? live.Lng ?? null;
+		if (rawLat != null && rawLng != null) {
+			lat = numberOrNull(rawLat);
+			lng = numberOrNull(rawLng);
+		}
+	}
+
+	// Normalize timestamp: try last_ping, timestamp, updatedAt, updated_at
+	const lastPing = live.last_ping ?? live.timestamp ?? live.updatedAt ?? live.updated_at ?? null;
+
+	// Normalize speed: try speed, Speed, velocity
+	const speed = numberOrNull(live.speed ?? live.Speed ?? live.velocity) || 0;
 
 	return {
 		bus_id: toTitle(live.bus_id),
@@ -89,8 +112,8 @@ function normalizeLiveDoc(live) {
 		next_stop: toTitle(live.next_stop),
 		lat,
 		lng,
-		speed: numberOrNull(live.speed) || 0,
-		last_ping: live.last_ping || null,
+		speed,
+		last_ping: lastPing,
 	};
 }
 
@@ -124,6 +147,20 @@ function parseCsvLine(line) {
 
 	values.push(current);
 	return values;
+}
+
+function normalizeKey(value) {
+	return String(value || '')
+		.toLowerCase()
+		.trim()
+		.replace(/\s+/g, ' ');
+}
+
+function extractRouteShortName(value) {
+	const raw = toTitle(value);
+	if (!raw) return '';
+	if (!raw.includes('|')) return raw;
+	return raw.split('|')[0].trim();
 }
 
 function loadGtfsRoutesFallback() {
@@ -192,6 +229,193 @@ function loadGtfsStopsFallback() {
 	} catch (_err) {
 		return [];
 	}
+}
+
+function buildGtfsRoutePathIndex() {
+	try {
+		const routesRaw = fs.readFileSync(GTFS_ROUTES_PATH, 'utf8');
+		const tripsRaw = fs.readFileSync(GTFS_TRIPS_PATH, 'utf8');
+		const stopTimesRaw = fs.readFileSync(GTFS_STOP_TIMES_PATH, 'utf8');
+		const stopsRaw = fs.readFileSync(GTFS_STOPS_PATH, 'utf8');
+
+		const routeLines = routesRaw.split(/\r?\n/).filter(Boolean);
+		const tripLines = tripsRaw.split(/\r?\n/).filter(Boolean);
+		const stopTimeLines = stopTimesRaw.split(/\r?\n/).filter(Boolean);
+		const stopLines = stopsRaw.split(/\r?\n/).filter(Boolean);
+
+		if (routeLines.length <= 1 || tripLines.length <= 1 || stopTimeLines.length <= 1 || stopLines.length <= 1) {
+			return new Map();
+		}
+
+		const routeHeaders = parseCsvLine(routeLines[0]);
+		const routeIdIdx = routeHeaders.indexOf('route_id');
+		const routeShortIdx = routeHeaders.indexOf('route_short_name');
+		const routeLongIdx = routeHeaders.indexOf('route_long_name');
+
+		const routesById = new Map();
+		for (const line of routeLines.slice(1)) {
+			const cols = parseCsvLine(line);
+			const routeId = toTitle(cols[routeIdIdx]);
+			if (!routeId) continue;
+			routesById.set(routeId, {
+				route_id: routeId,
+				route_short_name: toTitle(cols[routeShortIdx]),
+				route_long_name: toTitle(cols[routeLongIdx]),
+			});
+		}
+
+		const stopHeaders = parseCsvLine(stopLines[0]);
+		const stopIdIdx = stopHeaders.indexOf('stop_id');
+		const stopNameIdx = stopHeaders.indexOf('stop_name');
+		const stopLatIdx = stopHeaders.indexOf('stop_lat');
+		const stopLonIdx = stopHeaders.indexOf('stop_lon');
+
+		const stopsById = new Map();
+		for (const line of stopLines.slice(1)) {
+			const cols = parseCsvLine(line);
+			const stopId = toTitle(cols[stopIdIdx]);
+			if (!stopId) continue;
+			const lat = numberOrNull(cols[stopLatIdx]);
+			const lng = numberOrNull(cols[stopLonIdx]);
+			if (lat == null || lng == null) continue;
+			stopsById.set(stopId, {
+				stop_id: stopId,
+				stop_name: toTitle(cols[stopNameIdx]),
+				lat,
+				lng,
+			});
+		}
+
+		const tripHeaders = parseCsvLine(tripLines[0]);
+		const tripIdIdx = tripHeaders.indexOf('trip_id');
+		const tripRouteIdIdx = tripHeaders.indexOf('route_id');
+
+		const tripsByRouteId = new Map();
+		for (const line of tripLines.slice(1)) {
+			const cols = parseCsvLine(line);
+			const routeId = toTitle(cols[tripRouteIdIdx]);
+			const tripId = toTitle(cols[tripIdIdx]);
+			if (!routeId || !tripId) continue;
+			if (!tripsByRouteId.has(routeId)) tripsByRouteId.set(routeId, []);
+			tripsByRouteId.get(routeId).push(tripId);
+		}
+
+		const stopTimeHeaders = parseCsvLine(stopTimeLines[0]);
+		const stopTimeTripIdIdx = stopTimeHeaders.indexOf('trip_id');
+		const stopTimeStopIdIdx = stopTimeHeaders.indexOf('stop_id');
+		const stopSeqIdx = stopTimeHeaders.indexOf('stop_sequence');
+
+		const pointsByTripId = new Map();
+		for (const line of stopTimeLines.slice(1)) {
+			const cols = parseCsvLine(line);
+			const tripId = toTitle(cols[stopTimeTripIdIdx]);
+			const stopId = toTitle(cols[stopTimeStopIdIdx]);
+			const seq = Number(cols[stopSeqIdx]);
+			if (!tripId || !stopId || !Number.isFinite(seq)) continue;
+			const stop = stopsById.get(stopId);
+			if (!stop) continue;
+			if (!pointsByTripId.has(tripId)) pointsByTripId.set(tripId, []);
+			pointsByTripId.get(tripId).push({
+				seq,
+				lat: stop.lat,
+				lng: stop.lng,
+				stop_id: stop.stop_id,
+				stop_name: stop.stop_name,
+			});
+		}
+
+		const index = new Map();
+		for (const [routeId, tripIds] of tripsByRouteId.entries()) {
+			let best = [];
+			for (const tripId of tripIds) {
+				const points = pointsByTripId.get(tripId) || [];
+				if (points.length > best.length) best = points;
+			}
+			if (best.length < 2) continue;
+
+			const ordered = [...best].sort((a, b) => a.seq - b.seq);
+			const routeMeta = routesById.get(routeId) || { route_id: routeId, route_short_name: '', route_long_name: '' };
+			const label = asRouteLabel(routeMeta);
+
+			const payload = {
+				route_id: routeMeta.route_id,
+				route_short_name: routeMeta.route_short_name,
+				route_long_name: routeMeta.route_long_name,
+				route_label: label,
+				points: ordered,
+			};
+
+			index.set(normalizeKey(routeMeta.route_id), payload);
+			if (routeMeta.route_short_name) index.set(normalizeKey(routeMeta.route_short_name), payload);
+			if (label) index.set(normalizeKey(label), payload);
+		}
+
+		return index;
+	} catch (_err) {
+		return new Map();
+	}
+}
+
+function getRoutePathIndex() {
+	const now = Date.now();
+	if (routePathCache.index && now < routePathCache.expiresAt) {
+		return routePathCache.index;
+	}
+
+	const index = buildGtfsRoutePathIndex();
+	routePathCache = {
+		index,
+		expiresAt: now + 10 * 60 * 1000,
+	};
+
+	return index;
+}
+
+function resolveRoutePath(index, routeInput) {
+	const exact = index.get(normalizeKey(routeInput));
+	if (exact) return exact;
+
+	const shortName = extractRouteShortName(routeInput);
+	const normalizedShort = normalizeKey(shortName);
+	const normalizedInput = normalizeKey(routeInput);
+	const longPart = routeInput.includes('|') ? normalizeKey(routeInput.split('|').slice(1).join('|')) : '';
+
+	const uniqueByRouteId = new Map();
+	for (const value of index.values()) {
+		if (value && value.route_id && !uniqueByRouteId.has(value.route_id)) {
+			uniqueByRouteId.set(value.route_id, value);
+		}
+	}
+
+	const candidates = Array.from(uniqueByRouteId.values()).filter((item) => {
+		const short = normalizeKey(item.route_short_name);
+		const label = normalizeKey(item.route_label);
+		const routeId = normalizeKey(item.route_id);
+		return short === normalizedShort || label.includes(normalizedShort) || routeId === normalizedShort;
+	});
+
+	if (!candidates.length) return null;
+	if (!longPart) return candidates[0];
+
+	let best = candidates[0];
+	let bestScore = -1;
+	const wantedTokens = longPart.split(' ').filter(Boolean);
+
+	for (const item of candidates) {
+		const label = normalizeKey(item.route_label);
+		let score = 0;
+		if (label === normalizedInput) score += 100;
+		if (label.includes(longPart)) score += 50;
+		for (const token of wantedTokens) {
+			if (label.includes(token)) score += 1;
+		}
+		if (score > bestScore) {
+			bestScore = score;
+			best = item;
+		}
+	}
+
+	return best;
 }
 
 async function connectMongo() {
@@ -304,14 +528,22 @@ async function getSelectorData() {
 }
 
 async function findBusLive(busId) {
-	const raw = await db()
+	// Try sort by last_ping desc; also try _id desc as fallback for newer inserts
+	const candidates = await db()
 		.collection(LIVE_COLLECTION)
-		.findOne({ bus_id: String(busId) }, { sort: { last_ping: -1 } });
+		.find({ bus_id: String(busId) })
+		.sort({ _id: -1 })
+		.limit(3)
+		.toArray();
 
-	if (!raw) return null;
-	const normalized = normalizeLiveDoc(raw);
-	if (normalized.lat == null || normalized.lng == null) return null;
-	return normalized;
+	if (!candidates.length) return null;
+
+	for (const raw of candidates) {
+		const normalized = normalizeLiveDoc(raw);
+		if (normalized.lat != null && normalized.lng != null) return normalized;
+	}
+
+	return null;
 }
 
 app.get('/health', (_req, res) => {
@@ -374,26 +606,89 @@ app.get('/api/track/stream', async (req, res) => {
 	res.setHeader('Cache-Control', 'no-cache');
 	res.setHeader('Connection', 'keep-alive');
 
-	const send = async () => {
+	const writePacket = (busLive) => {
+		const packet = busLive
+			? { ok: true, data: busLive, timestamp: new Date().toISOString() }
+			: { ok: false, error: 'Bus location not found', timestamp: new Date().toISOString() };
+		try { res.write(`data: ${JSON.stringify(packet)}\n\n`); } catch (_err) {}
+	};
+
+	const poll = async () => {
 		try {
 			const busLive = await findBusLive(busId);
-			const packet = busLive
-				? { ok: true, data: busLive, timestamp: new Date().toISOString() }
-				: { ok: false, error: 'Bus location not found', timestamp: new Date().toISOString() };
-
-			res.write(`data: ${JSON.stringify(packet)}\n\n`);
-		} catch (error) {
-			res.write(`data: ${JSON.stringify({ ok: false, error: 'Tracking fetch failed' })}\n\n`);
+			writePacket(busLive);
+		} catch (_err) {
+			try { res.write(`data: ${JSON.stringify({ ok: false, error: 'Tracking fetch failed' })}\n\n`); } catch (_e) {}
 		}
 	};
 
-	await send();
-	const timer = setInterval(send, 2000);
+	// Always send initial state immediately
+	await poll();
+
+	// Try MongoDB Change Stream for instant push on every driver write
+	let changeStream = null;
+	let pollTimer = null;
+
+	try {
+		const pipeline = [{ $match: { 'fullDocument.bus_id': busId } }];
+		changeStream = db().collection(LIVE_COLLECTION).watch(pipeline, { fullDocument: 'updateLookup' });
+
+		changeStream.on('change', (change) => {
+			const doc = change.fullDocument;
+			if (!doc) return;
+			const normalized = normalizeLiveDoc(doc);
+			if (normalized.lat != null) writePacket(normalized);
+		});
+
+		changeStream.on('error', () => {
+			// Change stream failed - fall back to polling
+			if (changeStream) { try { changeStream.close(); } catch (_e) {} changeStream = null; }
+			if (!pollTimer) pollTimer = setInterval(poll, 2000);
+		});
+	} catch (_err) {
+		// Change stream unavailable - use polling only
+		pollTimer = setInterval(poll, 2000);
+	}
+
+	// Also always poll every 2s as safety net alongside change stream
+	pollTimer = setInterval(poll, 2000);
 
 	req.on('close', () => {
-		clearInterval(timer);
+		if (changeStream) { try { changeStream.close(); } catch (_e) {} }
+		if (pollTimer) clearInterval(pollTimer);
 		res.end();
 	});
+});
+
+app.get('/api/route-path', (req, res) => {
+	try {
+		const routeInput = toTitle(req.query.route || req.query.route_id);
+		if (!routeInput) {
+			return res.status(400).json({ error: 'route is required' });
+		}
+
+		const index = getRoutePathIndex();
+		if (!index.size) {
+			return res.status(404).json({ error: 'Route path data unavailable' });
+		}
+
+		const resolved = resolveRoutePath(index, routeInput);
+
+		if (!resolved) {
+			return res.status(404).json({ error: 'Route path not found' });
+		}
+
+		return res.status(200).json({
+			route: routeInput,
+			route_id: resolved.route_id,
+			route_label: resolved.route_label,
+			points: resolved.points,
+			updated_at: new Date().toISOString(),
+		});
+	} catch (error) {
+		console.error('route-path error:', error);
+		return res.status(500).json({ error: 'Unable to load route path' });
+	}
 });
 
 app.get('/', (_req, res) => {
