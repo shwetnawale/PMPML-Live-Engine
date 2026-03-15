@@ -27,3 +27,47 @@ if ($conn) {
 }
 
 npm start
+
+
+
+Searched for text `DEFAULT_ENGINE_ORIGIN|API_BASE|localStorage` (`**/Passenger/home.html`), 11 results
+
+Searched for files matching `**/.github/workflows/*.yml`, 1 match
+
+Read [](file:///d%3A/CEP/PMPML-Live-Engine/.github/workflows/deploy-passenger.yml)
+
+Here's the full live setup — **two things must run on your laptop simultaneously:**
+
+---
+
+### Step 1 — Start the backend server
+```powershell
+$conn = Get-NetTCPConnection -LocalPort 3100 -State Listen -ErrorAction SilentlyContinue; if ($conn) { $conn | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } }; Set-Location D:\CEP\PMPML-Live-Engine\Server1; npm start
+```
+Keep this terminal open.
+
+---
+
+### Step 2 — Start ngrok (in a new terminal)
+```powershell
+ngrok http 3100
+```
+Copy the `https://xxxx.ngrok-free.app` URL it shows.
+
+---
+
+### Step 3 — Tell the GitHub Pages frontend your ngrok URL
+
+Your GitHub Pages URL is something like:
+`https://<your-username>.github.io/PMPML-Live-Engine/`
+
+Open it and paste your ngrok URL into the **yellow settings bar**, or just add it as a URL param:
+```
+https://<your-username>.github.io/PMPML-Live-Engine/?server=https://xxxx.ngrok-free.app
+```
+The browser saves it in `localStorage`, so you only need to do this once per ngrok session.
+
+---
+
+### Every time ngrok restarts, the URL changes
+When that happens, just paste the new URL into the settings bar again (or use `?server=`). You can also update `DEFAULT_ENGINE_ORIGIN` in `cep 2/home.html` line 469 to skip this step for that file.

@@ -315,6 +315,8 @@
     </style>
 
     <script>
+        const API_BASE = 'https://4334-103-17-157-5.ngrok-free.app';
+
         // State
         let isTracking = false;
         let trackingInterval = null;
@@ -487,7 +489,7 @@
                 timestamp: new Date().toISOString()
             };
 
-            fetch('/api/bus-location', {
+            fetch(`${API_BASE}/api/bus-location`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)

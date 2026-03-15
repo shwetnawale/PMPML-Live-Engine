@@ -691,6 +691,41 @@ app.get('/api/route-path', (req, res) => {
 	}
 });
 
+app.post('/api/bus-location', async (req, res) => {
+	try {
+		if (!mongoOnline) {
+			return res.status(503).json({ error: 'MongoDB is offline' });
+		}
+		const { bus_id, latitude, longitude, timestamp } = req.body || {};
+		if (!bus_id || latitude == null || longitude == null) {
+			return res.status(400).json({ error: 'bus_id, latitude, and longitude are required' });
+		}
+		const lat = parseFloat(latitude);
+		const lng = parseFloat(longitude);
+		if (isNaN(lat) || isNaN(lng)) {
+			return res.status(400).json({ error: 'Invalid latitude or longitude' });
+		}
+		const liveCol = db.collection(LIVE_COLLECTION);
+		await liveCol.updateOne(
+			{ bus_id: String(bus_id) },
+			{
+				$set: {
+					bus_id: String(bus_id),
+					lat,
+					lng,
+					timestamp: timestamp || new Date().toISOString(),
+					updatedAt: new Date(),
+				},
+			},
+			{ upsert: true }
+		);
+		return res.status(200).json({ ok: true });
+	} catch (error) {
+		console.error('POST bus-location error:', error);
+		return res.status(500).json({ error: 'Unable to update bus location' });
+	}
+});
+
 app.get('/', (_req, res) => {
 	res.sendFile(path.join(PASSENGER_ROOT, 'home.html'));
 });
