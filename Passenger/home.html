@@ -621,6 +621,55 @@
       setStatus(selectorStatus, `Stop mapped to ${matchedRoutes.length} route(s), ${buses.length} bus(es).`, 'ok');
     }
 
+    function firstNonEmptySelectValue(selectEl) {
+      for (const op of Array.from(selectEl.options || [])) {
+        if (String(op.value || '').trim()) return String(op.value);
+      }
+      return '';
+    }
+
+    function syncRouteFromSelectedBus() {
+      const busId = busSelect.value;
+      if (!busId) return;
+      const selectedBus = (selectorPayload.buses || []).find((b) => String(b.bus_id) === String(busId));
+      if (!selectedBus) return;
+
+      const busRoute = selectedBus.route_id || selectedBus.route;
+      if (!busRoute) return;
+
+      const routeMatch = (selectorPayload.routes || []).find((r) => routeMatches(busRoute, r.route_id || r.route_label));
+      if (routeMatch) {
+        routeSelect.value = String(routeMatch.route_id || routeMatch.route_label);
+      }
+    }
+
+    function autoResolveSelectionForTracking() {
+      if (stopSelect.value) {
+        applyStopDrivenFilters();
+      }
+
+      if (!routeSelect.value) {
+        const routeVal = firstNonEmptySelectValue(routeSelect);
+        if (routeVal) {
+          routeSelect.value = routeVal;
+          applyRouteFilters();
+        }
+      }
+
+      if (!busSelect.value) {
+        const busVal = firstNonEmptySelectValue(busSelect);
+        if (busVal) {
+          busSelect.value = busVal;
+          syncRouteFromSelectedBus();
+          if (routeSelect.value) applyRouteFilters();
+        }
+      }
+
+      if (!routeSelect.value && busSelect.value) {
+        syncRouteFromSelectedBus();
+      }
+    }
+
     function initMap() {
       map = L.map('liveMap').setView([18.5204, 73.8567], 12);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -892,12 +941,14 @@
 
     stopSelect.addEventListener('change', () => {
       applyStopDrivenFilters();
+      autoResolveSelectionForTracking();
     });
 
     trackBtn.addEventListener('click', () => {
+      autoResolveSelectionForTracking();
       const busId = busSelect.value;
       if (!busId) {
-        setStatus(trackStatus, 'Select a bus ID first', 'warn');
+        setStatus(trackStatus, 'No live bus found for selected stop yet. Try another stop or wait for live update.', 'warn');
         return;
       }
       startTracking(busId);
