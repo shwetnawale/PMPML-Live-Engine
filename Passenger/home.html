@@ -1009,14 +1009,16 @@
       setStatus(trackStatus, `Connecting ${busId} stream...`, '');
       startPolling(busId);
 
+      // Always highlight the selected route, regardless of connection method
+      const selectedRoute = routeSelect.value;
+      if (selectedRoute) {
+        highlightedRouteKey = ''; // force re-draw even if same route
+        highlightRoute(selectedRoute);
+      }
+
       if (isNgrokBase()) {
         setStatus(trackStatus, 'Live via polling every 2s', 'ok');
         return;
-      }
-
-      const selectedRoute = routeSelect.value;
-      if (selectedRoute) {
-        highlightRoute(selectedRoute);
       }
 
       stream = new EventSource(apiUrl(`/api/track/stream?bus_id=${encodeURIComponent(busId)}`));
@@ -1074,6 +1076,7 @@
     routeSelect.addEventListener('change', async () => {
       applyRouteFilters();
       await populateStopsForRoute(routeSelect.value);
+      highlightedRouteKey = ''; // force re-draw on every route change
       highlightRoute(routeSelect.value);
     });
 

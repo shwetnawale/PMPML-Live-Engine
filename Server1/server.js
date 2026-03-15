@@ -14,10 +14,10 @@ const LIVE_COLLECTION = process.env.MONGO_COLLECTION_LIVE || 'live_tracking';
 const ROUTES_COLLECTION = process.env.MONGO_COLLECTION_ROUTES || 'routes';
 const STOPS_COLLECTION = process.env.MONGO_COLLECTION_STOPS || 'stops';
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
-const GTFS_STOPS_PATH = path.join(__dirname, '..', 'gtfs_data', 'stops.txt');
-const GTFS_ROUTES_PATH = path.join(__dirname, '..', 'gtfs_data', 'routes.txt');
-const GTFS_TRIPS_PATH = path.join(__dirname, '..', 'gtfs_data', 'trips.txt');
-const GTFS_STOP_TIMES_PATH = path.join(__dirname, '..', 'gtfs_data', 'stop_times.txt');
+const GTFS_STOPS_PATH = path.join(__dirname, '..', 'gtfs_data copy', 'stops.txt');
+const GTFS_ROUTES_PATH = path.join(__dirname, '..', 'gtfs_data copy', 'routes.txt');
+const GTFS_TRIPS_PATH = path.join(__dirname, '..', 'gtfs_data copy', 'trips.txt');
+const GTFS_STOP_TIMES_PATH = path.join(__dirname, '..', 'gtfs_data copy', 'stop_times.txt');
 
 if (!MONGO_URI) {
 	console.error('MONGO_URI is missing. Create Server1/.env from Server1/.env.example');
@@ -42,6 +42,30 @@ function toTitle(value) {
 	return String(value || '').trim();
 }
 
+function stripDirectionSuffix(value) {
+	return String(value || '')
+		.replace(/\s*\((up|down)\)\s*$/i, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+function normalizeRouteLookupKey(value) {
+	return normalizeKey(stripDirectionSuffix(value));
+}
+
+function toStringArray(value) {
+	if (Array.isArray(value)) {
+		return value.map((v) => toTitle(v)).filter(Boolean);
+	}
+	if (typeof value === 'string') {
+		return value
+			.split(',')
+			.map((v) => toTitle(v))
+			.filter(Boolean);
+	}
+	return [];
+}
+
 function numberOrNull(value) {
 	const parsed = Number(value);
 	return Number.isFinite(parsed) ? parsed : null;
@@ -59,22 +83,35 @@ function normalizeRouteDoc(route) {
 	const routeId = toTitle(route.route_id || route.routeId || route.code || route.route_no || route._id);
 	const shortName = toTitle(route.route_short_name || route.routeShortName || route.short_name || route.shortName || route.route_name || route.routeName || route.name || routeId);
 	const longName = toTitle(route.route_long_name || route.routeLongName || route.long_name || route.longName || route.description || '');
+	const label = asRouteLabel({ route_id: routeId, route_short_name: shortName, route_long_name: longName });
 
 	return {
 		route_id: routeId,
 		route_short_name: shortName,
 		route_long_name: longName,
-		route_label: asRouteLabel({ route_id: routeId, route_short_name: shortName, route_long_name: longName }),
+		route_label: label,
+		route_label_normalized: normalizeRouteLookupKey(label),
 	};
 }
 
 function normalizeStopDoc(stop) {
+	const routeId = toTitle(stop.route_id || stop.routeId || stop.route);
+	const routeIds = [
+		...toStringArray(stop.route_ids || stop.routeIds),
+		...toStringArray(stop.routes),
+		...(routeId ? [routeId] : []),
+	];
+	const lat = numberOrNull(stop.stop_lat ?? stop.stopLat ?? stop.lat ?? stop.latitude);
+	const lon = numberOrNull(stop.stop_lon ?? stop.stopLon ?? stop.lon ?? stop.lng ?? stop.longitude);
+
 	return {
 		stop_id: toTitle(stop.stop_id || stop.stopId || stop.id || stop._id),
 		stop_name: toTitle(stop.stop_name || stop.stopName || stop.name),
-		stop_lat: numberOrNull(stop.stop_lat ?? stop.stopLat ?? stop.lat ?? stop.latitude),
-		stop_lon: numberOrNull(stop.stop_lon ?? stop.stopLon ?? stop.lon ?? stop.lng ?? stop.longitude),
-		route_id: toTitle(stop.route_id || stop.routeId || stop.route),
+		stop_lat: lat,
+		stop_lon: lon,
+		location: (lat != null && lon != null) ? { type: 'Point', coordinates: [lon, lat] } : null,
+		route_id: routeId,
+		route_ids: Array.from(new Set(routeIds)),
 	};
 }
 
@@ -108,6 +145,7 @@ function normalizeLiveDoc(live) {
 		bus_id: toTitle(live.bus_id || live.busId || live.bus_no || live.busNo || live.vehicle_no || live.vehicleNo || live.bus || live.id),
 		route: toTitle(live.route || live.route_name || live.routeName || live.line || live.line_name),
 		route_id: toTitle(live.route_id || live.routeId || live.route || live.route_name || live.routeName),
+		route_label_normalized: normalizeRouteLookupKey(live.route_id || live.route || live.route_name || live.routeName),
 		current_stop: toTitle(live.current_stop),
 		next_stop: toTitle(live.next_stop),
 		lat,
@@ -154,6 +192,19 @@ function normalizeKey(value) {
 		.toLowerCase()
 		.trim()
 		.replace(/\s+/g, ' ');
+}
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+	const toRad = (v) => (v * Math.PI) / 180;
+	const R = 6371000;
+	const dLat = toRad(lat2 - lat1);
+	const dLon = toRad(lon2 - lon1);
+	const a =
+		Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+		Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+		Math.sin(dLon / 2) * Math.sin(dLon / 2);
+	const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+	return R * c;
 }
 
 function extractRouteShortName(value) {
@@ -346,8 +397,11 @@ function buildGtfsRoutePathIndex() {
 			};
 
 			index.set(normalizeKey(routeMeta.route_id), payload);
+			index.set(normalizeRouteLookupKey(routeMeta.route_id), payload);
 			if (routeMeta.route_short_name) index.set(normalizeKey(routeMeta.route_short_name), payload);
+			if (routeMeta.route_short_name) index.set(normalizeRouteLookupKey(routeMeta.route_short_name), payload);
 			if (label) index.set(normalizeKey(label), payload);
+			if (label) index.set(normalizeRouteLookupKey(label), payload);
 		}
 
 		return index;
@@ -375,8 +429,13 @@ function resolveRoutePath(index, routeInput) {
 	const exact = index.get(normalizeKey(routeInput));
 	if (exact) return exact;
 
+	const normalizedRouteInput = normalizeRouteLookupKey(routeInput);
+	const exactNormalized = index.get(normalizedRouteInput);
+	if (exactNormalized) return exactNormalized;
+
 	const shortName = extractRouteShortName(routeInput);
 	const normalizedShort = normalizeKey(shortName);
+	const normalizedShortNoDir = normalizeRouteLookupKey(shortName);
 	const normalizedInput = normalizeKey(routeInput);
 	const longPart = routeInput.includes('|') ? normalizeKey(routeInput.split('|').slice(1).join('|')) : '';
 
@@ -391,7 +450,12 @@ function resolveRoutePath(index, routeInput) {
 		const short = normalizeKey(item.route_short_name);
 		const label = normalizeKey(item.route_label);
 		const routeId = normalizeKey(item.route_id);
-		return short === normalizedShort || label.includes(normalizedShort) || routeId === normalizedShort;
+		const shortNoDir = normalizeRouteLookupKey(item.route_short_name);
+		const labelNoDir = normalizeRouteLookupKey(item.route_label);
+		const routeIdNoDir = normalizeRouteLookupKey(item.route_id);
+		return short === normalizedShort || label.includes(normalizedShort) || routeId === normalizedShort ||
+			shortNoDir === normalizedShortNoDir || labelNoDir.includes(normalizedShortNoDir) || routeIdNoDir === normalizedShortNoDir ||
+			labelNoDir.includes(normalizedRouteInput);
 	});
 
 	if (!candidates.length) return null;
@@ -442,6 +506,52 @@ async function connectMongo() {
 	}
 }
 
+async function runDataQualityChecks() {
+	if (!mongoOnline) return;
+	try {
+		const routesCol = db().collection(ROUTES_COLLECTION);
+		const stopsCol = db().collection(STOPS_COLLECTION);
+		const liveCol = db().collection(LIVE_COLLECTION);
+
+		const [routesRaw, stopsRaw, liveRaw] = await Promise.all([
+			routesCol.find({}, { projection: { _id: 0 } }).limit(10000).toArray(),
+			stopsCol.find({}, { projection: { _id: 0 } }).limit(20000).toArray(),
+			liveCol.find({}, { projection: { _id: 0 } }).limit(20000).toArray(),
+		]);
+
+		const routes = routesRaw.map(normalizeRouteDoc);
+		const stops = stopsRaw.map(normalizeStopDoc);
+		const live = liveRaw.map(normalizeLiveDoc);
+
+		const stopsMissingIdOrName = stops.filter((s) => !s.stop_id || !s.stop_name).length;
+		const stopsMissingLocation = stops.filter((s) => !s.location || !Array.isArray(s.location.coordinates)).length;
+		const stopsMissingRouteMapping = stops.filter((s) => !(s.route_id || (Array.isArray(s.route_ids) && s.route_ids.length))).length;
+
+		const routeKeys = new Set(routes.map((r) => normalizeRouteLookupKey(r.route_id || r.route_label)).filter(Boolean));
+		const stopsRouteKeys = new Set(
+			stops
+				.flatMap((s) => [s.route_id, ...(Array.isArray(s.route_ids) ? s.route_ids : [])])
+				.map((v) => normalizeRouteLookupKey(v))
+				.filter(Boolean)
+		);
+		const routesWithNoStops = Array.from(routeKeys).filter((rk) => !stopsRouteKeys.has(rk)).length;
+
+		const unknownLiveRouteLabels = live.filter((b) => {
+			const key = normalizeRouteLookupKey(b.route_id || b.route);
+			return key && !routeKeys.has(key);
+		}).length;
+
+		console.log('[DATA-QUALITY] total_stops=', stops.length);
+		console.log('[DATA-QUALITY] stops_missing_id_or_name=', stopsMissingIdOrName);
+		console.log('[DATA-QUALITY] stops_missing_location=', stopsMissingLocation);
+		console.log('[DATA-QUALITY] stops_missing_route_mapping=', stopsMissingRouteMapping);
+		console.log('[DATA-QUALITY] routes_with_no_stops=', routesWithNoStops);
+		console.log('[DATA-QUALITY] live_buses_unknown_route_labels=', unknownLiveRouteLabels);
+	} catch (error) {
+		console.error('[DATA-QUALITY] failed:', error.message);
+	}
+}
+
 function db() {
 	return mongoClient.db(DB_NAME);
 }
@@ -482,6 +592,7 @@ async function getSelectorData() {
 				bus_id: normalized.bus_id,
 				route: normalized.route,
 				route_id: normalized.route_id || normalized.route,
+				route_label_normalized: normalizeRouteLookupKey(normalized.route_id || normalized.route),
 				last_ping: normalized.last_ping || null,
 			});
 		}
@@ -700,7 +811,7 @@ app.get('/api/stop-routes', async (req, res) => {
 		}
 
 		const targetStopId = normalizeKey(stopIdInput);
-		const targetStopName = normalizeKey(stopNameInput);
+		const targetStopName = normalizeRouteLookupKey(stopNameInput);
 
 		const index = getRoutePathIndex();
 		const uniqueRoutes = uniqueRoutePathEntries(index);
@@ -742,13 +853,14 @@ app.get('/api/stop-routes', async (req, res) => {
 			for (const raw of liveRaw) {
 				const normalized = normalizeLiveDoc(raw);
 				if (!normalized.bus_id) continue;
-				const liveRouteKey = normalizeKey(normalized.route_id || normalized.route);
+				const liveRouteKey = normalizeRouteLookupKey(normalized.route_id || normalized.route);
 				if (!liveRouteKey || !Array.from(routeKeys).some((rk) => rk === liveRouteKey || rk.includes(liveRouteKey) || liveRouteKey.includes(rk))) continue;
 				if (!busesById.has(normalized.bus_id)) {
 					busesById.set(normalized.bus_id, {
 						bus_id: normalized.bus_id,
 						route: normalized.route,
 						route_id: normalized.route_id || normalized.route,
+						route_label_normalized: normalizeRouteLookupKey(normalized.route_id || normalized.route),
 						last_ping: normalized.last_ping || null,
 					});
 				}
@@ -766,6 +878,106 @@ app.get('/api/stop-routes', async (req, res) => {
 	} catch (error) {
 		console.error('stop-routes error:', error);
 		return res.status(500).json({ error: 'Unable to resolve routes for selected stop', routes: [], buses: [] });
+	}
+});
+
+app.get('/api/nearest-stop', async (req, res) => {
+	try {
+		const lat = numberOrNull(req.query.lat);
+		const lon = numberOrNull(req.query.lon);
+		if (lat == null || lon == null) {
+			return res.status(400).json({ error: 'lat and lon are required' });
+		}
+
+		const stopsRaw = await db()
+			.collection(STOPS_COLLECTION)
+			.find({}, { projection: { _id: 0 } })
+			.limit(20000)
+			.toArray();
+
+		const stops = stopsRaw.map(normalizeStopDoc).filter((s) => s.stop_name && s.stop_lat != null && s.stop_lon != null);
+		if (!stops.length) {
+			return res.status(404).json({ error: 'No stop coordinates available' });
+		}
+
+		let nearest = null;
+		let bestDistance = Number.POSITIVE_INFINITY;
+		for (const stop of stops) {
+			const dist = haversineMeters(lat, lon, stop.stop_lat, stop.stop_lon);
+			if (dist < bestDistance) {
+				bestDistance = dist;
+				nearest = stop;
+			}
+		}
+
+		if (!nearest) return res.status(404).json({ error: 'No stop found' });
+
+		return res.status(200).json({
+			stop_id: nearest.stop_id,
+			stop_name: nearest.stop_name,
+			stop_lat: nearest.stop_lat,
+			stop_lon: nearest.stop_lon,
+			distance_m: Math.round(bestDistance),
+			updated_at: new Date().toISOString(),
+		});
+	} catch (error) {
+		console.error('nearest-stop error:', error);
+		return res.status(500).json({ error: 'Unable to find nearest stop' });
+	}
+});
+
+app.get('/api/nearest-routes', async (req, res) => {
+	try {
+		const lat = numberOrNull(req.query.lat);
+		const lon = numberOrNull(req.query.lon);
+		if (lat == null || lon == null) {
+			return res.status(400).json({ error: 'lat and lon are required' });
+		}
+
+		const selector = await getSelectorData();
+		const stops = (selector.stops || []).filter((s) => s.stop_lat != null && s.stop_lon != null);
+		if (!stops.length) {
+			return res.status(404).json({ error: 'No stop coordinates available', stops: [], routes: [], buses: [] });
+		}
+
+		const sortedStops = stops
+			.map((s) => ({ ...s, distance_m: haversineMeters(lat, lon, s.stop_lat, s.stop_lon) }))
+			.sort((a, b) => a.distance_m - b.distance_m)
+			.slice(0, 3);
+
+		const routeHints = new Set();
+		for (const stop of sortedStops) {
+			if (stop.route_id) routeHints.add(normalizeRouteLookupKey(stop.route_id));
+			for (const rid of (Array.isArray(stop.route_ids) ? stop.route_ids : [])) {
+				routeHints.add(normalizeRouteLookupKey(rid));
+			}
+		}
+
+		const routes = (selector.routes || []).filter((r) => {
+			const key = normalizeRouteLookupKey(r.route_id || r.route_label);
+			return key && routeHints.has(key);
+		});
+
+		const buses = (selector.buses || []).filter((b) => {
+			const key = normalizeRouteLookupKey(b.route_id || b.route);
+			return key && routeHints.has(key);
+		});
+
+		return res.status(200).json({
+			stops: sortedStops.map((s) => ({
+				stop_id: s.stop_id,
+				stop_name: s.stop_name,
+				stop_lat: s.stop_lat,
+				stop_lon: s.stop_lon,
+				distance_m: Math.round(s.distance_m),
+			})),
+			routes,
+			buses,
+			updated_at: new Date().toISOString(),
+		});
+	} catch (error) {
+		console.error('nearest-routes error:', error);
+		return res.status(500).json({ error: 'Unable to resolve nearest routes', stops: [], routes: [], buses: [] });
 	}
 });
 
@@ -818,5 +1030,6 @@ process.on('SIGINT', async () => {
 
 app.listen(PORT, async () => {
 	await connectMongo();
+	await runDataQualityChecks();
 	console.log(`Server1 listening on http://localhost:${PORT}`);
 });
