@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Passenger Live Hub</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    :root {
+      --ink: #13293d;
+      --ink-soft: #355070;
+      --line: #d9e2ec;
+      --panel: #ffffff;
+      --bg: #f2f7fb;
+      --accent: #e76f51;
+      --accent-dark: #c95a3f;
+      --ok: #2a9d8f;
+      --warn: #d1495b;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background:
+        radial-gradient(850px 350px at -20% -20%, #fef3c7 0%, transparent 70%),
+        radial-gradient(900px 380px at 115% 10%, #bee3db 0%, transparent 70%),
+        linear-gradient(160deg, #f7fbff 0%, #eaf2f9 100%);
+      color: var(--ink);
+      min-height: 100vh;
+      padding: 14px;
+    }
+
+    .app {
+      width: min(1150px, 100%);
+      margin: 0 auto;
+      display: grid;
+      gap: 14px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #102a43 0%, #1f3c57 60%, #355070 100%);
+      color: #fff;
+      border-radius: 18px;
+      padding: 16px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 14px 34px rgba(16, 42, 67, 0.24);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -40px;
+      bottom: -60px;
+      width: 180px;
+      height: 180px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .hero-title { margin: 0; font-size: 24px; letter-spacing: 0.02em; }
+    .hero-text { margin: 6px 0 0; color: #d3e1ee; font-size: 13px; }
+
+    .layout {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: 1fr;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: 0 8px 22px rgba(16, 42, 67, 0.07);
+    }
+
+    .section-title {
+      margin: 0 0 10px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    .stack { display: grid; gap: 10px; }
+    label { font-size: 12px; font-weight: 700; color: var(--ink-soft); }
+
+    select,
+    button,
+    input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 11px;
+      font-size: 14px;
+      color: var(--ink);
+      background: #fff;
+    }
+
+    select:focus,
+    input:focus {
+      outline: none;
+      border-color: #8da9c4;
+      box-shadow: 0 0 0 3px rgba(141, 169, 196, 0.2);
+    }
+
+    .btn-primary {
+      border: none;
+      font-weight: 800;
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+      box-shadow: 0 10px 24px rgba(201, 90, 63, 0.28);
+      cursor: pointer;
+    }
+
+    .btn-ghost {
+      font-weight: 700;
+      background: #f8fbff;
+      cursor: pointer;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .status-chip {
+      margin-top: 10px;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #edf2f7;
+      color: var(--ink-soft);
+    }
+
+    .status-chip.ok { background: #e6fcf5; color: #1f7a6f; }
+    .status-chip.warn { background: #fff1f2; color: var(--warn); }
+
+    .telemetry {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .metric {
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      padding: 10px;
+      background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+    }
+
+    .metric .k {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--ink-soft);
+      font-weight: 800;
+    }
+
+    .metric .v {
+      margin-top: 6px;
+      font-size: 17px;
+      font-weight: 900;
+      color: var(--ink);
+      word-break: break-word;
+    }
+
+    .map-wrap {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #dfeaf6;
+    }
+
+    #liveMap { height: 320px; }
+
+    .map-badge {
+      position: absolute;
+      z-index: 500;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid #d6e1eb;
+      border-radius: 10px;
+      padding: 7px 10px;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--ink);
+    }
+
+    .map-actions {
+      position: absolute;
+      right: 10px;
+      top: 10px;
+      z-index: 500;
+      display: grid;
+      gap: 6px;
+    }
+
+    .map-actions button {
+      width: auto;
+      font-size: 11px;
+      border-radius: 9px;
+      padding: 7px 10px;
+      border: 1px solid #d6e1eb;
+      background: rgba(255, 255, 255, 0.96);
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .hint {
+      margin-top: 10px;
+      font-size: 11px;
+      color: var(--ink-soft);
+      font-weight: 600;
+    }
+
+    .server-bar {
+      background: #fff8e7;
+      border: 1px solid #f4d35e;
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .server-bar label {
+      font-size: 11px;
+      font-weight: 800;
+      color: #7d5a00;
+      white-space: nowrap;
+    }
+
+    .server-bar input {
+      flex: 1;
+      min-width: 160px;
+      border: 1px solid #f4d35e;
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 13px;
+      background: #fffff8;
+    }
+
+    .server-bar button {
+      width: auto;
+      padding: 7px 14px;
+      font-size: 12px;
+      font-weight: 800;
+      border-radius: 8px;
+      border: none;
+      background: #f4d35e;
+      color: #5a3e00;
+      cursor: pointer;
+    }
+
+    .server-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #ccc;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    .server-dot.ok { background: #2a9d8f; }
+    .server-dot.warn { background: #d1495b; }
+
+    @media (min-width: 950px) {
+      .layout {
+        grid-template-columns: 370px 1fr;
+      }
+
+      #liveMap { height: 520px; }
+      .telemetry { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <section class="hero">
+      <h1 class="hero-title"><i class="fa-solid fa-bus-simple"></i> Passenger Live Hub</h1>
+      <p class="hero-text">Live bus tracking for PMPML &mdash; routes, stops, and real-time location.</p>
+    </section>
+
+    <div class="server-bar" id="serverBar">
+      <span class="server-dot" id="serverDot"></span>
+      <label for="serverInput"><i class="fa-solid fa-server"></i> Server URL</label>
+      <input id="serverInput" type="url" placeholder="http://localhost:3100" />
+      <button id="serverSaveBtn">Connect</button>
+      <span id="serverLabel" style="font-size:11px;font-weight:700;color:#7d5a00;"></span>
+    </div>
+
+    <div class="layout">
+      <section class="card">
+        <h2 class="section-title">Select Bus</h2>
+        <div class="stack">
+          <div>
+            <label for="routeSelect">Route</label>
+            <select id="routeSelect"><option value="">Loading routes...</option></select>
+          </div>
+          <div>
+            <label for="stopSelect">Stop</label>
+            <select id="stopSelect"><option value="">Loading stops...</option></select>
+            <div id="routeStopsHint" style="margin-top:6px;font-size:11px;font-weight:700;color:#6b7280;display:none;"></div>
+          </div>
+          <div>
+            <label for="busSelect">Bus ID</label>
+            <select id="busSelect"><option value="">Loading buses...</option></select>
+          </div>
+          <button id="trackBtn" class="btn-primary"><i class="fa-solid fa-location-crosshairs"></i> Start Live Tracking</button>
+          <div class="toolbar">
+            <button id="shareBtn" class="btn-ghost"><i class="fa-solid fa-share-nodes"></i> Share</button>
+            <button id="copyBtn" class="btn-ghost"><i class="fa-regular fa-copy"></i> Copy Link</button>
+          </div>
+        </div>
+        <div id="selectorStatus" class="status-chip">Preparing selector data...</div>
+        <div id="trackStatus" class="status-chip">Not tracking yet.</div>
+        <div class="hint">Tip: open link with <b>?bus=BUS_ID</b> to auto-start tracking.</div>
+      </section>
+
+      <section class="card">
+        <h2 class="section-title">Live Tracking</h2>
+        <div class="telemetry">
+          <div class="metric"><div class="k">Bus</div><div class="v" id="outBus">--</div></div>
+          <div class="metric"><div class="k">Route</div><div class="v" id="outRoute">--</div></div>
+          <div class="metric"><div class="k">Speed</div><div class="v" id="outSpeed">0 km/h</div></div>
+          <div class="metric"><div class="k">Latitude</div><div class="v" id="outLat">--</div></div>
+          <div class="metric"><div class="k">Longitude</div><div class="v" id="outLng">--</div></div>
+          <div class="metric"><div class="k">Last Ping</div><div class="v" id="outPing">--</div></div>
+        </div>
+
+        <div class="map-wrap" id="mapWrap">
+          <div class="map-badge" id="mapBadge">Route --</div>
+          <div class="map-actions">
+            <button id="fullscreenBtn"><i class="fa-solid fa-expand"></i> Fullscreen</button>
+          </div>
+          <div id="liveMap"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const routeSelect = document.getElementById('routeSelect');
+    const stopSelect = document.getElementById('stopSelect');
+    const busSelect = document.getElementById('busSelect');
+    const trackBtn = document.getElementById('trackBtn');
+    const shareBtn = document.getElementById('shareBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const routeStopsHint = document.getElementById('routeStopsHint');
+    const selectorStatus = document.getElementById('selectorStatus');
+    const trackStatus = document.getElementById('trackStatus');
+    const mapBadge = document.getElementById('mapBadge');
+
+    const outBus = document.getElementById('outBus');
+    const outRoute = document.getElementById('outRoute');
+    const outSpeed = document.getElementById('outSpeed');
+    const outLat = document.getElementById('outLat');
+    const outLng = document.getElementById('outLng');
+    const outPing = document.getElementById('outPing');
+
+    // ── API base URL ──────────────────────────────────────────────────────────
+    //  Priority: ?server= param → localStorage → auto-detect localhost
+    const _params = new URLSearchParams(window.location.search);
+
+    function normalizeServerBase(raw) {
+      const value = String(raw || '').trim().replace(/\/$/, '');
+      if (!value) return '';
+      try {
+        const parsed = new URL(value);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          return '';
+        }
+        return parsed.origin;
+      } catch {
+        return '';
+      }
+    }
+
+    let API_BASE = (() => {
+      const fromParam = normalizeServerBase(_params.get('server') || _params.get('engine'));
+      if (fromParam) { localStorage.setItem('pmpml_server', fromParam); return fromParam; }
+      const fromStore = normalizeServerBase(localStorage.getItem('pmpml_server'));
+      if (fromStore) return fromStore;
+      const h = window.location.hostname;
+      if (h === 'localhost' || h === '127.0.0.1') return '';
+      return '';
+    })();
+
+    const serverInput = document.getElementById('serverInput');
+    const serverSaveBtn = document.getElementById('serverSaveBtn');
+    const serverDot = document.getElementById('serverDot');
+    const serverLabel = document.getElementById('serverLabel');
+
+    function setServerDot(state, text) {
+      serverDot.className = 'server-dot' + (state === 'ok' ? ' ok' : state === 'warn' ? ' warn' : '');
+      serverLabel.textContent = text || '';
+    }
+
+    function updateServerInput() {
+      const h = window.location.hostname;
+      const isLocal = h === 'localhost' || h === '127.0.0.1';
+      serverInput.value = API_BASE || (isLocal ? 'http://localhost:3100' : '');
+      document.getElementById('serverBar').style.display =
+        (isLocal && !API_BASE) ? 'none' : 'flex';
+    }
+
+    serverSaveBtn.addEventListener('click', () => {
+      const val = normalizeServerBase(serverInput.value);
+      if (serverInput.value.trim() && !val) {
+        setStatus(selectorStatus, 'Enter a valid server URL, example: https://xxxx.ngrok-free.app', 'warn');
+        setServerDot('warn', 'Invalid server URL');
+        return;
+      }
+      API_BASE = val;
+      if (val) localStorage.setItem('pmpml_server', val);
+      else localStorage.removeItem('pmpml_server');
+      setServerDot('', 'Saved — reloading...');
+      setTimeout(() => location.reload(), 400);
+    });
+
+    function apiUrl(path) {
+      if (!API_BASE) return path;
+      const url = new URL(path, `${API_BASE}/`);
+      return url.toString();
+    }
+
+    function isNgrokBase() {
+      return Boolean(API_BASE) && API_BASE.includes('ngrok-free.app');
+    }
+
+    function isLocalHost() {
+      const h = window.location.hostname;
+      return h === 'localhost' || h === '127.0.0.1';
+    }
+
+    function apiFetch(path, init) {
+      const cfg = init ? { ...init } : {};
+      const headers = new Headers(cfg.headers || {});
+      if (isNgrokBase()) {
+        headers.set('ngrok-skip-browser-warning', 'true');
+      }
+      cfg.headers = headers;
+      return fetch(apiUrl(path), cfg);
+    }
+
+    function buildTrackingLink(busId) {
+      const link = new URL(window.location.href);
+      link.searchParams.set('bus', busId);
+      if (API_BASE) {
+        link.searchParams.set('server', API_BASE);
+        link.searchParams.set('engine', API_BASE);
+      }
+      return link.toString();
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    let selectorPayload = { routes: [], stops: [], buses: [] };
+    let stream = null;
+    let pollTimer = null;
+    let selectorRefreshTimer = null;
+    let map = null;
+    let busMarker = null;
+    let busPulse = null;
+    let routeLine = null;
+    let routeEndpoints = null;
+    let highlightedRouteKey = '';
+
+    function setStatus(el, message, tone) {
+      el.textContent = message;
+      el.className = 'status-chip';
+      if (tone === 'ok') el.classList.add('ok');
+      if (tone === 'warn') el.classList.add('warn');
+    }
+
+    function setRouteStopsHint(message, tone) {
+      const text = String(message || '').trim();
+      if (!text) {
+        routeStopsHint.style.display = 'none';
+        routeStopsHint.textContent = '';
+        return;
+      }
+      routeStopsHint.style.display = 'block';
+      routeStopsHint.textContent = text;
+      routeStopsHint.style.color = tone === 'warn' ? '#b45309' : '#0f766e';
+    }
+
+    function markLiveHeartbeat(mode) {
+      const nowLabel = new Date().toLocaleTimeString();
+      setStatus(trackStatus, `Live ${mode} update ${nowLabel}`, 'ok');
+    }
+
+    function fillSelect(select, items, labelOf, valueOf) {
+      const keep = select.value;
+      select.innerHTML = '<option value="">Select...</option>';
+      for (const item of items) {
+        const op = document.createElement('option');
+        op.textContent = labelOf(item);
+        op.value = String(valueOf(item));
+        select.appendChild(op);
+      }
+      if (keep && items.some((x) => String(valueOf(x)) === keep)) {
+        select.value = keep;
+      }
+    }
+
+    function normKey(value) {
+      return String(value || '').trim().toLowerCase();
+    }
+
+    function routeMatches(selectedRoute, candidateRoute) {
+      const a = normKey(selectedRoute);
+      const b = normKey(candidateRoute);
+      if (!a || !b) return false;
+      return a === b || a.includes(b) || b.includes(a);
+    }
+
+    async function populateStopsForRoute(routeValue) {
+      const routeKey = String(routeValue || '').trim();
+      if (!routeKey) {
+        setRouteStopsHint('', 'ok');
+        return false;
+      }
+      try {
+        const response = await apiFetch(`/api/route-path?route=${encodeURIComponent(routeKey)}`, { cache: 'no-store' });
+        if (!response.ok) {
+          setRouteStopsHint('', 'ok');
+          return false;
+        }
+        const payload = await response.json();
+        if (!Array.isArray(payload.points) || !payload.points.length) {
+          setRouteStopsHint('', 'ok');
+          return false;
+        }
+
+        const byStop = new Map();
+        for (const p of payload.points) {
+          const stopId = String(p.stop_id || '').trim();
+          const stopName = String(p.stop_name || '').trim();
+          if (!stopId && !stopName) continue;
+          const key = stopId || stopName;
+          if (!byStop.has(key)) {
+            byStop.set(key, {
+              stop_id: stopId || stopName,
+              stop_name: stopName || stopId,
+              route_id: routeKey,
+            });
+          }
+        }
+
+        const mappedStops = Array.from(byStop.values());
+        if (!mappedStops.length) {
+          setRouteStopsHint('', 'ok');
+          return false;
+        }
+
+        fillSelect(stopSelect, mappedStops, (s) => `${s.stop_name} (${s.stop_id})`, (s) => s.stop_id || s.stop_name);
+        setRouteStopsHint(`Route stops loaded: ${mappedStops.length}`, 'ok');
+        return true;
+      } catch {
+        setRouteStopsHint('', 'ok');
+        return false;
+      }
+    }
+
+    function getFilteredStops(routeId) {
+      const allStops = selectorPayload.stops || [];
+      if (!routeId) return allStops;
+
+      const hasRouteMapping = allStops.some((s) => {
+        const direct = s.route_id || s.route || s.route_name || s.route_label;
+        const arrays = Array.isArray(s.route_ids) ? s.route_ids : (Array.isArray(s.routes) ? s.routes : []);
+        return Boolean(direct) || arrays.length > 0;
+      });
+
+      const filtered = allStops.filter((s) => {
+        const direct = s.route_id || s.route || s.route_name || s.route_label;
+        if (routeMatches(routeId, direct)) return true;
+
+        const arrays = Array.isArray(s.route_ids) ? s.route_ids : (Array.isArray(s.routes) ? s.routes : []);
+        return arrays.some((r) => routeMatches(routeId, r));
+      });
+
+      // If stops have no route mapping fields, keep all stops to avoid blank selector.
+      if (!filtered.length && !hasRouteMapping) {
+        return allStops;
+      }
+
+      return filtered;
+    }
+
+    function applyRouteFilters() {
+      const routeId = routeSelect.value;
+      const stops = getFilteredStops(routeId);
+      const buses = routeId
+        ? (selectorPayload.buses || []).filter((b) => routeMatches(routeId, b.route_id || b.route))
+        : (selectorPayload.buses || []);
+
+      fillSelect(stopSelect, stops, (s) => `${s.stop_name} (${s.stop_id})`, (s) => s.stop_id || s.stop_name);
+      fillSelect(busSelect, buses, (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
+      if (!routeId) {
+        setRouteStopsHint('', 'ok');
+      }
+    }
+
+    function findSelectedStop() {
+      const value = stopSelect.value;
+      if (!value) return null;
+      return (selectorPayload.stops || []).find((s) => String(s.stop_id || s.stop_name) === value) || null;
+    }
+
+    function getRouteHintsFromStop(stop) {
+      if (!stop) return [];
+      const hints = [];
+      const direct = [stop.route_id, stop.route, stop.route_name, stop.route_label];
+      for (const item of direct) {
+        const v = String(item || '').trim();
+        if (v) hints.push(v);
+      }
+      const arrayHints = Array.isArray(stop.route_ids) ? stop.route_ids : (Array.isArray(stop.routes) ? stop.routes : []);
+      for (const item of arrayHints) {
+        const v = String(item || '').trim();
+        if (v) hints.push(v);
+      }
+      return [...new Set(hints)];
+    }
+
+    async function fetchFallbackRouteHintsForStop(stop) {
+      if (!stop) return { routeHints: [], buses: [] };
+      const stopId = String(stop.stop_id || '').trim();
+      const stopName = String(stop.stop_name || '').trim();
+      if (!stopId && !stopName) return { routeHints: [], buses: [] };
+
+      const query = new URLSearchParams();
+      if (stopId) query.set('stop_id', stopId);
+      if (stopName) query.set('stop_name', stopName);
+
+      try {
+        const response = await apiFetch(`/api/stop-routes?${query.toString()}`, { cache: 'no-store' });
+        if (!response.ok) return { routeHints: [], buses: [] };
+        const payload = await response.json();
+        const routeHints = (payload.routes || []).map((r) => r.route_id || r.route_label).filter(Boolean);
+        const buses = Array.isArray(payload.buses) ? payload.buses : [];
+        return { routeHints: [...new Set(routeHints)], buses };
+      } catch {
+        return { routeHints: [], buses: [] };
+      }
+    }
+
+    async function applyStopDrivenFilters() {
+      const stop = findSelectedStop();
+      if (!stop) return;
+
+      let routeHints = getRouteHintsFromStop(stop);
+      let fallbackBuses = [];
+
+      if (!routeHints.length) {
+        const fallback = await fetchFallbackRouteHintsForStop(stop);
+        routeHints = fallback.routeHints;
+        fallbackBuses = fallback.buses;
+      }
+
+      if (!routeHints.length) {
+        const liveBuses = selectorPayload.buses || [];
+        fillSelect(busSelect, liveBuses, (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
+        if (!busSelect.value) {
+          const firstBus = firstNonEmptySelectValue(busSelect);
+          if (firstBus) busSelect.value = firstBus;
+        }
+
+        if (busSelect.value) {
+          syncRouteFromSelectedBus();
+          if (routeSelect.value) {
+            await populateStopsForRoute(routeSelect.value);
+            applyRouteFilters();
+            highlightRoute(routeSelect.value);
+          }
+          setStatus(selectorStatus, 'Stop not mapped. Using nearest live route/bus fallback.', 'warn');
+          return;
+        }
+
+        setStatus(selectorStatus, 'Stop selected, but no mapped routes or live buses found.', 'warn');
+        return;
+      }
+
+      const matchedRoutes = (selectorPayload.routes || []).filter((r) =>
+        routeHints.some((hint) => routeMatches(hint, r.route_id || r.route_label))
+      );
+
+      if (!matchedRoutes.length) {
+        setStatus(selectorStatus, 'Stop selected. Could not find mapped routes for this stop.', 'warn');
+        return;
+      }
+
+      const keepRoute = routeSelect.value;
+      fillSelect(routeSelect, matchedRoutes, (r) => r.route_label || r.route_id, (r) => r.route_id || r.route_label);
+
+      const hasKept = keepRoute && matchedRoutes.some((r) => String(r.route_id || r.route_label) === keepRoute);
+      if (hasKept) {
+        routeSelect.value = keepRoute;
+      } else if (matchedRoutes.length === 1) {
+        routeSelect.value = String(matchedRoutes[0].route_id || matchedRoutes[0].route_label);
+      }
+
+      const routeId = routeSelect.value;
+      const busSource = (fallbackBuses && fallbackBuses.length) ? fallbackBuses : (selectorPayload.buses || []);
+      const buses = routeId
+        ? busSource.filter((b) => routeMatches(routeId, b.route_id || b.route))
+        : busSource.filter((b) => routeHints.some((hint) => routeMatches(hint, b.route_id || b.route)));
+
+      fillSelect(busSelect, buses, (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
+
+      if (routeId) {
+        await populateStopsForRoute(routeId);
+        highlightRoute(routeId);
+      }
+
+      setStatus(selectorStatus, `Stop mapped to ${matchedRoutes.length} route(s), ${buses.length} bus(es).`, 'ok');
+    }
+
+    function firstNonEmptySelectValue(selectEl) {
+      for (const op of Array.from(selectEl.options || [])) {
+        if (String(op.value || '').trim()) return String(op.value);
+      }
+      return '';
+    }
+
+    function syncRouteFromSelectedBus() {
+      const busId = busSelect.value;
+      if (!busId) return;
+      const selectedBus = (selectorPayload.buses || []).find((b) => String(b.bus_id) === String(busId));
+      if (!selectedBus) return;
+
+      const busRoute = selectedBus.route_id || selectedBus.route;
+      if (!busRoute) return;
+
+      const routeMatch = (selectorPayload.routes || []).find((r) => routeMatches(busRoute, r.route_id || r.route_label));
+      if (routeMatch) {
+        routeSelect.value = String(routeMatch.route_id || routeMatch.route_label);
+      }
+    }
+
+    function autoResolveSelectionForTracking() {
+      if (stopSelect.value) {
+        // async path handled by caller before tracking starts
+      }
+
+      if (!routeSelect.value) {
+        const routeVal = firstNonEmptySelectValue(routeSelect);
+        if (routeVal) {
+          routeSelect.value = routeVal;
+          applyRouteFilters();
+        }
+      }
+
+      if (!busSelect.value) {
+        const busVal = firstNonEmptySelectValue(busSelect);
+        if (busVal) {
+          busSelect.value = busVal;
+          syncRouteFromSelectedBus();
+          if (routeSelect.value) applyRouteFilters();
+        }
+      }
+
+      if (!routeSelect.value && busSelect.value) {
+        syncRouteFromSelectedBus();
+      }
+    }
+
+    async function resolveSelectionForTracking() {
+      if (stopSelect.value) {
+        await applyStopDrivenFilters();
+      }
+
+      autoResolveSelectionForTracking();
+
+      if (routeSelect.value && !stopSelect.value) {
+        applyRouteFilters();
+      }
+
+      if (!busSelect.value) {
+        const anyLiveBus = firstNonEmptySelectValue(busSelect);
+        if (anyLiveBus) {
+          busSelect.value = anyLiveBus;
+          syncRouteFromSelectedBus();
+        }
+      }
+
+      if (routeSelect.value) {
+        await populateStopsForRoute(routeSelect.value);
+      }
+    }
+
+    function initMap() {
+      map = L.map('liveMap').setView([18.5204, 73.8567], 12);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors',
+      }).addTo(map);
+    }
+
+    function updateMap(lat, lng, route) {
+      if (!map) initMap();
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+      if (!busMarker) {
+        busMarker = L.marker([lat, lng]).addTo(map);
+        busPulse = L.circle([lat, lng], {
+          radius: 120,
+          color: '#2a9d8f',
+          fillColor: '#2a9d8f',
+          fillOpacity: 0.13,
+          weight: 1,
+        }).addTo(map);
+      } else {
+        busMarker.setLatLng([lat, lng]);
+        busPulse.setLatLng([lat, lng]);
+      }
+
+      busMarker.bindPopup(`<b>${outBus.textContent}</b><br>${route || 'Route --'}`).openPopup();
+      map.setView([lat, lng], Math.max(map.getZoom(), 14), { animate: true });
+      mapBadge.textContent = route ? `Route ${route}` : 'Route --';
+    }
+
+    function clearRouteHighlight() {
+      if (!map) return;
+      if (routeLine) {
+        map.removeLayer(routeLine);
+        routeLine = null;
+      }
+      if (routeEndpoints) {
+        map.removeLayer(routeEndpoints);
+        routeEndpoints = null;
+      }
+      highlightedRouteKey = '';
+    }
+
+    async function highlightRoute(routeValue) {
+      if (!routeValue) {
+        clearRouteHighlight();
+        return;
+      }
+
+      const routeKey = String(routeValue).trim();
+      if (!routeKey || highlightedRouteKey === routeKey) return;
+
+      try {
+        const response = await apiFetch(`/api/route-path?route=${encodeURIComponent(routeKey)}`);
+        const payload = await response.json();
+        if (!response.ok || !Array.isArray(payload.points) || payload.points.length < 2) {
+          clearRouteHighlight();
+          return;
+        }
+
+        const latLngs = payload.points
+          .map((p) => [Number(p.lat), Number(p.lng)])
+          .filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+
+        if (latLngs.length < 2) {
+          clearRouteHighlight();
+          return;
+        }
+
+        if (!map) initMap();
+        clearRouteHighlight();
+
+        routeLine = L.polyline(latLngs, {
+          color: '#e76f51',
+          weight: 5,
+          opacity: 0.86,
+        }).addTo(map);
+
+        const first = payload.points[0];
+        const last = payload.points[payload.points.length - 1];
+        routeEndpoints = L.layerGroup([
+          L.circleMarker([first.lat, first.lng], {
+            radius: 5,
+            color: '#102a43',
+            fillColor: '#102a43',
+            fillOpacity: 1,
+          }).bindTooltip(`Start: ${first.stop_name || first.stop_id || 'First Stop'}`),
+          L.circleMarker([last.lat, last.lng], {
+            radius: 5,
+            color: '#2a9d8f',
+            fillColor: '#2a9d8f',
+            fillOpacity: 1,
+          }).bindTooltip(`End: ${last.stop_name || last.stop_id || 'Last Stop'}`),
+        ]).addTo(map);
+
+        highlightedRouteKey = routeKey;
+        map.fitBounds(routeLine.getBounds(), { padding: [24, 24] });
+      } catch (_error) {
+        clearRouteHighlight();
+      }
+    }
+
+    function stopTracking() {
+      if (stream) {
+        stream.close();
+        stream = null;
+      }
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    function applyLiveData(data) {
+      const liveRoute = data.route || data.route_id || '';
+      outBus.textContent = data.bus_id || '--';
+      outRoute.textContent = liveRoute || '--';
+      outSpeed.textContent = `${Math.round(Number(data.speed || 0))} km/h`;
+      outLat.textContent = data.lat != null ? Number(data.lat).toFixed(6) : '--';
+      outLng.textContent = data.lng != null ? Number(data.lng).toFixed(6) : '--';
+      outPing.textContent = data.last_ping ? new Date(data.last_ping).toLocaleTimeString() : '--';
+
+      updateMap(Number(data.lat), Number(data.lng), outRoute.textContent);
+
+      if (!routeSelect.value && liveRoute) {
+        routeSelect.value = liveRoute;
+      }
+      if (liveRoute) {
+        highlightRoute(liveRoute);
+      }
+    }
+
+    async function loadSelectorData() {
+      setStatus(selectorStatus, 'Loading routes, stops, and buses...', '');
+      const response = await apiFetch(`/api/selector-data?t=${Date.now()}`, { cache: 'no-store' });
+      const ctype = (response.headers.get('content-type') || '').toLowerCase();
+      if (!ctype.includes('application/json')) {
+        throw new Error('Server URL is incorrect or unreachable. Use your ngrok https URL and tap Connect.');
+      }
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Unable to load selector data');
+      }
+
+      selectorPayload = payload;
+
+      fillSelect(routeSelect, payload.routes || [], (r) => r.route_label || r.route_id, (r) => r.route_id || r.route_label);
+      applyRouteFilters();
+
+      setStatus(selectorStatus, `Loaded ${payload.routes.length} routes, ${payload.stops.length} stops, ${payload.buses.length} buses.`, 'ok');
+    }
+
+    async function refreshSelectorDataSilently() {
+      try {
+        const response = await apiFetch(`/api/selector-data?t=${Date.now()}`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const ctype = (response.headers.get('content-type') || '').toLowerCase();
+        if (!ctype.includes('application/json')) return;
+        const payload = await response.json();
+        selectorPayload = payload;
+        fillSelect(routeSelect, payload.routes || [], (r) => r.route_label || r.route_id, (r) => r.route_id || r.route_label);
+        applyRouteFilters();
+      } catch (_err) {
+        // Silent refresh should never interrupt active tracking.
+      }
+    }
+
+    function filterBuses() {
+      applyRouteFilters();
+    }
+
+    async function pollTrack(busId) {
+      try {
+        const response = await apiFetch(`/api/track?bus_id=${encodeURIComponent(busId)}`);
+        const payload = await response.json();
+        if (!response.ok) {
+          setStatus(trackStatus, payload.error || 'Tracking unavailable', 'warn');
+          return;
+        }
+        applyLiveData(payload);
+        if (!stream) {
+          markLiveHeartbeat('poll');
+        }
+      } catch (error) {
+        setStatus(trackStatus, error.message || 'Tracking failed', 'warn');
+      }
+    }
+
+    function startPolling(busId) {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+      }
+      pollTrack(busId);
+      pollTimer = setInterval(() => pollTrack(busId), 2000);
+    }
+
+    function startTracking(busId) {
+      stopTracking();
+      setStatus(trackStatus, `Connecting ${busId} stream...`, '');
+      startPolling(busId);
+
+      // Always highlight the selected route, regardless of connection method
+      const selectedRoute = routeSelect.value;
+      if (selectedRoute) {
+        highlightedRouteKey = ''; // force re-draw even if same route
+        highlightRoute(selectedRoute);
+      }
+
+      if (isNgrokBase()) {
+        setStatus(trackStatus, 'Live via polling every 2s', 'ok');
+        return;
+      }
+
+      stream = new EventSource(apiUrl(`/api/track/stream?bus_id=${encodeURIComponent(busId)}`));
+      stream.onmessage = (event) => {
+        const packet = JSON.parse(event.data);
+        if (!packet.ok) {
+          setStatus(trackStatus, packet.error || 'No signal yet', 'warn');
+          return;
+        }
+        applyLiveData(packet.data);
+        markLiveHeartbeat('stream');
+      };
+
+      stream.onerror = () => {
+        if (stream) {
+          stream.close();
+          stream = null;
+        }
+        setStatus(trackStatus, 'Stream disconnected, polling every 2s', 'warn');
+      };
+    }
+
+    function shareTracking() {
+      const busId = busSelect.value;
+      if (!busId) {
+        setStatus(trackStatus, 'Select bus ID first for sharing', 'warn');
+        return;
+      }
+      const link = buildTrackingLink(busId);
+      if (navigator.share) {
+        navigator.share({
+          title: 'Passenger Live Tracking',
+          text: `Track bus ${busId} live`,
+          url: link,
+        }).catch(() => {});
+      } else {
+        navigator.clipboard.writeText(link).then(() => {
+          setStatus(trackStatus, 'Link copied to clipboard', 'ok');
+        });
+      }
+    }
+
+    function copyTrackingLink() {
+      const busId = busSelect.value;
+      if (!busId) {
+        setStatus(trackStatus, 'Select bus ID first for copy', 'warn');
+        return;
+      }
+      const link = buildTrackingLink(busId);
+      navigator.clipboard.writeText(link).then(() => {
+        setStatus(trackStatus, 'Tracking link copied', 'ok');
+      });
+    }
+
+    routeSelect.addEventListener('change', async () => {
+      applyRouteFilters();
+      await populateStopsForRoute(routeSelect.value);
+      highlightedRouteKey = ''; // force re-draw on every route change
+      highlightRoute(routeSelect.value);
+    });
+
+    stopSelect.addEventListener('change', async () => {
+      await applyStopDrivenFilters();
+      autoResolveSelectionForTracking();
+    });
+
+    busSelect.addEventListener('change', () => {
+      syncRouteFromSelectedBus();
+      if (routeSelect.value) {
+        applyRouteFilters();
+        highlightRoute(routeSelect.value);
+      }
+    });
+
+    trackBtn.addEventListener('click', async () => {
+      await resolveSelectionForTracking();
+      const busId = busSelect.value;
+      if (!busId) {
+        setStatus(trackStatus, 'No live bus found for selected stop yet. Try another stop or wait for live update.', 'warn');
+        return;
+      }
+      startTracking(busId);
+    });
+
+    shareBtn.addEventListener('click', shareTracking);
+    copyBtn.addEventListener('click', copyTrackingLink);
+
+    document.getElementById('fullscreenBtn').addEventListener('click', () => {
+      const mapWrap = document.getElementById('mapWrap');
+      if (document.fullscreenElement === mapWrap) {
+        document.exitFullscreen();
+      } else {
+        mapWrap.requestFullscreen();
+      }
+      setTimeout(() => map && map.invalidateSize(), 180);
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+      setTimeout(() => map && map.invalidateSize(), 180);
+    });
+
+    (async () => {
+      updateServerInput();
+      initMap();
+
+      if (!isLocalHost() && !API_BASE) {
+        setStatus(selectorStatus, 'Enter your ngrok https URL above, then tap Connect.', 'warn');
+        setServerDot('warn', 'Server URL required');
+        document.getElementById('serverBar').style.display = 'flex';
+        return;
+      }
+
+      try {
+        setServerDot('', 'Connecting...');
+        await loadSelectorData();
+        setServerDot('ok', API_BASE || 'localhost');
+        if (selectorRefreshTimer) clearInterval(selectorRefreshTimer);
+        selectorRefreshTimer = setInterval(refreshSelectorDataSilently, 10000);
+      } catch (error) {
+        setStatus(selectorStatus, error.message || 'Selector load failed — check Server URL above', 'warn');
+        setServerDot('warn', 'Cannot reach server');
+        document.getElementById('serverBar').style.display = 'flex';
+      }
+
+      const busFromUrl = (_params.get('bus') || '').trim();
+      if (busFromUrl) {
+        busSelect.value = busFromUrl;
+        startTracking(busFromUrl);
+      }
+    })();
+  </script>
+</body>
+</html>
