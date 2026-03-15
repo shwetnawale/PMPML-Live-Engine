@@ -376,10 +376,25 @@
     // ── API base URL ──────────────────────────────────────────────────────────
     //  Priority: ?server= param → localStorage → auto-detect localhost
     const _params = new URLSearchParams(window.location.search);
+
+    function normalizeServerBase(raw) {
+      const value = String(raw || '').trim().replace(/\/$/, '');
+      if (!value) return '';
+      try {
+        const parsed = new URL(value);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          return '';
+        }
+        return parsed.origin;
+      } catch {
+        return '';
+      }
+    }
+
     let API_BASE = (() => {
-      const fromParam = (_params.get('server') || '').replace(/\/$/, '');
+      const fromParam = normalizeServerBase(_params.get('server') || _params.get('engine'));
       if (fromParam) { localStorage.setItem('pmpml_server', fromParam); return fromParam; }
-      const fromStore = (localStorage.getItem('pmpml_server') || '').replace(/\/$/, '');
+      const fromStore = normalizeServerBase(localStorage.getItem('pmpml_server'));
       if (fromStore) return fromStore;
       const h = window.location.hostname;
       if (h === 'localhost' || h === '127.0.0.1') return '';
@@ -405,7 +420,12 @@
     }
 
     serverSaveBtn.addEventListener('click', () => {
-      const val = serverInput.value.trim().replace(/\/$/, '');
+      const val = normalizeServerBase(serverInput.value);
+      if (serverInput.value.trim() && !val) {
+        setStatus(selectorStatus, 'Enter a valid server URL, example: https://xxxx.ngrok-free.app', 'warn');
+        setServerDot('warn', 'Invalid server URL');
+        return;
+      }
       API_BASE = val;
       if (val) localStorage.setItem('pmpml_server', val);
       else localStorage.removeItem('pmpml_server');
@@ -413,7 +433,40 @@
       setTimeout(() => location.reload(), 400);
     });
 
-    function apiUrl(path) { return API_BASE + path; }
+    function apiUrl(path) {
+      if (!API_BASE) return path;
+      const url = new URL(path, `${API_BASE}/`);
+      return url.toString();
+    }
+
+    function isNgrokBase() {
+      return Boolean(API_BASE) && API_BASE.includes('ngrok-free.app');
+    }
+
+    function isLocalHost() {
+      const h = window.location.hostname;
+      return h === 'localhost' || h === '127.0.0.1';
+    }
+
+    function apiFetch(path, init) {
+      const cfg = init ? { ...init } : {};
+      const headers = new Headers(cfg.headers || {});
+      if (isNgrokBase()) {
+        headers.set('ngrok-skip-browser-warning', 'true');
+      }
+      cfg.headers = headers;
+      return fetch(apiUrl(path), cfg);
+    }
+
+    function buildTrackingLink(busId) {
+      const link = new URL(window.location.href);
+      link.searchParams.set('bus', busId);
+      if (API_BASE) {
+        link.searchParams.set('server', API_BASE);
+        link.searchParams.set('engine', API_BASE);
+      }
+      return link.toString();
+    }
     // ─────────────────────────────────────────────────────────────────────────
 
     let selectorPayload = { routes: [], stops: [], buses: [] };
@@ -506,7 +559,7 @@
       if (!routeKey || highlightedRouteKey === routeKey) return;
 
       try {
-        const response = await fetch(apiUrl(`/api/route-path?route=${encodeURIComponent(routeKey)}`));
+        const response = await apiFetch(`/api/route-path?route=${encodeURIComponent(routeKey)}`);
         const payload = await response.json();
         if (!response.ok || !Array.isArray(payload.points) || payload.points.length < 2) {
           clearRouteHighlight();
@@ -587,7 +640,11 @@
 
     async function loadSelectorData() {
       setStatus(selectorStatus, 'Loading routes, stops, and buses...', '');
-      const response = await fetch(apiUrl('/api/selector-data'));
+      const response = await apiFetch('/api/selector-data');
+      const ctype = (response.headers.get('content-type') || '').toLowerCase();
+      if (!ctype.includes('application/json')) {
+        throw new Error('Server URL is incorrect or unreachable. Use your ngrok https URL and tap Connect.');
+      }
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(payload.error || 'Unable to load selector data');
@@ -613,7 +670,7 @@
 
     async function pollTrack(busId) {
       try {
-        const response = await fetch(apiUrl(`/api/track?bus_id=${encodeURIComponent(busId)}`));
+        const response = await apiFetch(`/api/track?bus_id=${encodeURIComponent(busId)}`);
         const payload = await response.json();
         if (!response.ok) {
           setStatus(trackStatus, payload.error || 'Tracking unavailable', 'warn');
@@ -640,6 +697,11 @@
       stopTracking();
       setStatus(trackStatus, `Connecting ${busId} stream...`, '');
       startPolling(busId);
+
+      if (isNgrokBase()) {
+        setStatus(trackStatus, 'Live via polling every 2s', 'ok');
+        return;
+      }
 
       const selectedRoute = routeSelect.value;
       if (selectedRoute) {
@@ -672,7 +734,7 @@
         setStatus(trackStatus, 'Select bus ID first for sharing', 'warn');
         return;
       }
-      const link = `${window.location.origin}${window.location.pathname}?bus=${encodeURIComponent(busId)}`;
+      const link = buildTrackingLink(busId);
       if (navigator.share) {
         navigator.share({
           title: 'Passenger Live Tracking',
@@ -692,7 +754,7 @@
         setStatus(trackStatus, 'Select bus ID first for copy', 'warn');
         return;
       }
-      const link = `${window.location.origin}${window.location.pathname}?bus=${encodeURIComponent(busId)}`;
+      const link = buildTrackingLink(busId);
       navigator.clipboard.writeText(link).then(() => {
         setStatus(trackStatus, 'Tracking link copied', 'ok');
       });
@@ -732,6 +794,14 @@
     (async () => {
       updateServerInput();
       initMap();
+
+      if (!isLocalHost() && !API_BASE) {
+        setStatus(selectorStatus, 'Enter your ngrok https URL above, then tap Connect.', 'warn');
+        setServerDot('warn', 'Server URL required');
+        document.getElementById('serverBar').style.display = 'flex';
+        return;
+      }
+
       try {
         setServerDot('', 'Connecting...');
         await loadSelectorData();
@@ -742,7 +812,7 @@
         document.getElementById('serverBar').style.display = 'flex';
       }
 
-      const busFromUrl = _params.get('bus');
+      const busFromUrl = (_params.get('bus') || '').trim();
       if (busFromUrl) {
         busSelect.value = busFromUrl;
         startTracking(busFromUrl);
