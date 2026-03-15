@@ -16,7 +16,10 @@
             </div>
 
             <label for="engine-url" class="mb-2 block text-xs font-bold uppercase tracking-[0.24em] text-slate-500">HTTPS Engine URL</label>
-            <input id="engine-url" class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 outline-none ring-emerald-400 focus:border-emerald-400 focus:ring" placeholder="https://xxxx.ngrok-free.app" />
+            <div class="flex gap-3">
+                <input id="engine-url" class="min-w-0 flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 outline-none ring-emerald-400 focus:border-emerald-400 focus:ring" placeholder="https://xxxx.ngrok-free.app" />
+                <button id="paste-link" type="button" class="shrink-0 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-black uppercase tracking-[0.18em] text-emerald-700 transition hover:bg-emerald-100">Paste</button>
+            </div>
 
             <div class="mt-5 flex flex-wrap gap-3">
                 <button id="open-home" class="rounded-xl bg-[#2f4858] px-5 py-3 text-xs font-black uppercase tracking-[0.18em] text-white transition hover:bg-[#243846]">Open Passenger Home</button>
@@ -79,6 +82,28 @@
 
         document.getElementById('check-link').addEventListener('click', async () => {
             await checkBroker();
+        });
+
+        document.getElementById('paste-link').addEventListener('click', async () => {
+            if (!navigator.clipboard || !navigator.clipboard.readText) {
+                setState('Status: clipboard paste not supported here', 'bad');
+                return;
+            }
+
+            try {
+                const clipText = await navigator.clipboard.readText();
+                if (!clipText.trim()) {
+                    setState('Status: clipboard is empty', 'bad');
+                    return;
+                }
+
+                input.value = clipText.trim();
+                input.focus();
+                input.setSelectionRange(input.value.length, input.value.length);
+                setState('Status: link pasted, now check broker', 'ok');
+            } catch (_err) {
+                setState('Status: allow clipboard access and try again', 'bad');
+            }
         });
 
         document.getElementById('open-home').addEventListener('click', async () => {
