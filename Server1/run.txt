@@ -13,3 +13,17 @@ if ($conn) {
   foreach ($procId in $procIds) { Stop-Process -Id $procId -Force }
 }
 npm start
+
+
+
+sfsdf
+
+cd D:\CEP\PMPML-Live-Engine\Server1
+
+$conn = Get-NetTCPConnection -LocalPort 3100 -State Listen -ErrorAction SilentlyContinue
+if ($conn) {
+  $procIds = $conn | Select-Object -ExpandProperty OwningProcess -Unique
+  foreach ($procId in $procIds) { Stop-Process -Id $procId -Force }
+}
+
+npm start

@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { MongoClient } = require('mongodb');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
@@ -13,6 +14,8 @@ const LIVE_COLLECTION = process.env.MONGO_COLLECTION_LIVE || 'live_tracking';
 const ROUTES_COLLECTION = process.env.MONGO_COLLECTION_ROUTES || 'routes';
 const STOPS_COLLECTION = process.env.MONGO_COLLECTION_STOPS || 'stops';
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
+const GTFS_STOPS_PATH = path.join(__dirname, '..', 'gtfs_data', 'stops.txt');
+const GTFS_ROUTES_PATH = path.join(__dirname, '..', 'gtfs_data', 'routes.txt');
 
 if (!MONGO_URI) {
 	console.error('MONGO_URI is missing. Create Server1/.env from Server1/.env.example');
@@ -91,6 +94,106 @@ function normalizeLiveDoc(live) {
 	};
 }
 
+function parseCsvLine(line) {
+	const values = [];
+	let current = '';
+	let inQuotes = false;
+
+	for (let i = 0; i < line.length; i += 1) {
+		const ch = line[i];
+		const next = line[i + 1];
+
+		if (ch === '"') {
+			if (inQuotes && next === '"') {
+				current += '"';
+				i += 1;
+			} else {
+				inQuotes = !inQuotes;
+			}
+			continue;
+		}
+
+		if (ch === ',' && !inQuotes) {
+			values.push(current);
+			current = '';
+			continue;
+		}
+
+		current += ch;
+	}
+
+	values.push(current);
+	return values;
+}
+
+function loadGtfsRoutesFallback() {
+	try {
+		const raw = fs.readFileSync(GTFS_ROUTES_PATH, 'utf8');
+		const lines = raw.split(/\r?\n/).filter(Boolean);
+		if (lines.length <= 1) return [];
+
+		const headers = parseCsvLine(lines[0]);
+		const routeIdIdx = headers.indexOf('route_id');
+		const shortIdx = headers.indexOf('route_short_name');
+		const longIdx = headers.indexOf('route_long_name');
+
+		const seen = new Set();
+		const routes = [];
+
+		for (const line of lines.slice(1)) {
+			const cols = parseCsvLine(line);
+			const routeId = toTitle(cols[routeIdIdx]);
+			const shortName = toTitle(cols[shortIdx]);
+			const longName = toTitle(cols[longIdx]);
+			const key = `${shortName}__${longName}`;
+			if (!shortName || seen.has(key)) continue;
+			seen.add(key);
+
+			routes.push({
+				route_id: routeId || shortName,
+				route_short_name: shortName,
+				route_long_name: longName,
+				route_label: longName ? `${shortName} | ${longName}` : shortName,
+			});
+		}
+
+		return routes.sort((a, b) => a.route_label.localeCompare(b.route_label));
+	} catch (_err) {
+		return [];
+	}
+}
+
+function loadGtfsStopsFallback() {
+	try {
+		const raw = fs.readFileSync(GTFS_STOPS_PATH, 'utf8');
+		const lines = raw.split(/\r?\n/).filter(Boolean);
+		if (lines.length <= 1) return [];
+
+		const headers = parseCsvLine(lines[0]);
+		const idIdx = headers.indexOf('stop_id');
+		const nameIdx = headers.indexOf('stop_name');
+		const latIdx = headers.indexOf('stop_lat');
+		const lonIdx = headers.indexOf('stop_lon');
+
+		return lines
+			.slice(1)
+			.map((line) => {
+				const cols = parseCsvLine(line);
+				return {
+					stop_id: toTitle(cols[idIdx]),
+					stop_name: toTitle(cols[nameIdx]),
+					stop_lat: numberOrNull(cols[latIdx]),
+					stop_lon: numberOrNull(cols[lonIdx]),
+					route_id: '',
+				};
+			})
+			.filter((s) => s.stop_id && s.stop_name)
+			.sort((a, b) => a.stop_name.localeCompare(b.stop_name));
+	} catch (_err) {
+		return [];
+	}
+}
+
 async function connectMongo() {
 	try {
 		await mongoClient.connect();
@@ -145,22 +248,48 @@ async function getSelectorData() {
 		.toArray();
 
 	const routes = routesRaw.map(normalizeRouteDoc).sort((a, b) => a.route_label.localeCompare(b.route_label));
-	const stops = stopsRaw
+	let stops = stopsRaw
 		.map(normalizeStopDoc)
 		.filter((s) => s.stop_name)
 		.sort((a, b) => a.stop_name.localeCompare(b.stop_name));
+	let resolvedRoutes = routes;
 	const buses = busesRaw
 		.map((b) => ({
 			bus_id: toTitle(b.bus_id),
 			route: toTitle(b.route),
-			route_id: toTitle(b.route_id),
+			route_id: toTitle(b.route_id) || toTitle(b.route),
 			last_ping: b.last_ping || null,
 		}))
 		.filter((b) => b.bus_id)
 		.sort((a, b) => a.bus_id.localeCompare(b.bus_id));
 
+	if (!resolvedRoutes.length) {
+		const liveRoutes = buses
+			.filter((b) => b.route)
+			.map((b) => ({
+				route_id: b.route_id || b.route,
+				route_short_name: b.route,
+				route_long_name: '',
+				route_label: b.route,
+			}));
+
+		const dedup = new Map();
+		for (const route of liveRoutes) {
+			dedup.set(route.route_label, route);
+		}
+		resolvedRoutes = Array.from(dedup.values()).sort((a, b) => a.route_label.localeCompare(b.route_label));
+	}
+
+	if (!resolvedRoutes.length) {
+		resolvedRoutes = loadGtfsRoutesFallback();
+	}
+
+	if (!stops.length) {
+		stops = loadGtfsStopsFallback();
+	}
+
 	const payload = {
-		routes,
+		routes: resolvedRoutes,
 		stops,
 		buses,
 		updated_at: new Date().toISOString(),
