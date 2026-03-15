@@ -215,6 +215,8 @@
                      <h3 class="text-[13px] font-bold tracking-tight text-slate-800">Available Routes</h3>
                      <button onclick="goSearch()" class="text-[11px] font-bold text-[#8e9cae] hover:text-brand-700 transition uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-arrow-left"></i> Back</button>
                 </div>
+
+                <div id="journey-summary" class="hidden bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3 text-[11px] text-slate-600"></div>
                 
                 <div id="route-map" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" style="height: 250px;"></div>
                 
@@ -515,6 +517,259 @@
         ];
 
         let currentActiveBus = null;
+        let currentJourney = {
+            userGeo: null,
+            boardingStop: '',
+            destinationStop: '',
+            autoDetectedStart: false,
+        };
+        let selectedResultIndex = 0;
+        let routePreviewLines = [];
+        let routePreviewMarkers = [];
+        let trackingJourneyMarkers = [];
+        let passengerLocationTimer = null;
+
+        function routeColor(idx) {
+            return ['#344d67', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][idx % 5];
+        }
+
+        function updateJourneySummary() {
+            const summary = document.getElementById('journey-summary');
+            if (!summary) return;
+
+            if (!currentJourney.destinationStop) {
+                summary.classList.add('hidden');
+                summary.innerHTML = '';
+                return;
+            }
+
+            const originLabel = currentJourney.autoDetectedStart
+                ? `Current location near <span class="font-bold text-slate-800">${currentJourney.boardingStop || 'nearby stop'}</span>`
+                : `<span class="font-bold text-slate-800">${currentJourney.boardingStop || 'Selected stop'}</span>`;
+
+            const locationNote = currentJourney.userGeo
+                ? `<span class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-blue-600"><i class="fa-solid fa-location-crosshairs"></i> Live passenger location ready</span>`
+                : '';
+
+            summary.classList.remove('hidden');
+            summary.innerHTML = `
+                <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div>
+                        <div class="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Journey Preview</div>
+                        <div class="mt-1 text-[13px] text-slate-700">${originLabel} <span class="mx-1 text-slate-300">→</span> <span class="font-bold text-slate-800">${currentJourney.destinationStop}</span></div>
+                    </div>
+                    <div>${locationNote}</div>
+                </div>
+            `;
+        }
+
+        function setJourneyContext(nextContext) {
+            currentJourney = {
+                ...currentJourney,
+                ...nextContext,
+            };
+            updateJourneySummary();
+        }
+
+        function clearPassengerLocationRefresh() {
+            if (passengerLocationTimer) {
+                clearInterval(passengerLocationTimer);
+                passengerLocationTimer = null;
+            }
+        }
+
+        async function refreshPassengerLocation(showErrors) {
+            const geo = await getUserPosition();
+            if (!geo) {
+                if (showErrors) {
+                    throw new Error('Please allow location access to continue');
+                }
+                return null;
+            }
+
+            setJourneyContext({ userGeo: geo });
+
+            if (routeMapInstance && !document.getElementById('view-results').classList.contains('hide') && availableBuses.length) {
+                focusRouteCandidate(selectedResultIndex, false);
+            }
+            if (map && currentActiveBus) {
+                refreshTrackingJourneyMarkers();
+            }
+            return geo;
+        }
+
+        function startPassengerLocationRefresh() {
+            clearPassengerLocationRefresh();
+            refreshPassengerLocation(false).catch(() => {});
+            passengerLocationTimer = setInterval(() => {
+                refreshPassengerLocation(false).catch(() => {});
+            }, 15000);
+        }
+
+        function mapPlanOption(opt, index, fallbackDestination, fallbackBoarding) {
+            const polyline = Array.isArray(opt.polyline) ? opt.polyline : [];
+            const firstPoint = polyline[0] || opt.start_coords || [18.5204, 73.8567];
+            const lastPoint = polyline[polyline.length - 1] || opt.end_coords || firstPoint;
+            const etaMin = Number(opt.eta || 0);
+            const departure = String(opt.departure || '--:--:--');
+            const stops = Array.isArray(opt.stops) ? opt.stops : [];
+            const busNo = String(opt.bus_no || `BUS-${index + 1}`);
+            const routeLabel = String(opt.route_label || opt.route_name || busNo);
+
+            return {
+                id: `${busNo}-${index}`,
+                liveBusId: busNo,
+                route: opt.is_transfer ? `${routeLabel} • Transfer` : routeLabel,
+                eta: `${etaMin} min`,
+                distance: `${Number(opt.walk_dist || 0)} m walk`,
+                walkDistanceMeters: Number(opt.walk_dist || 0),
+                lat: Number(firstPoint[0]),
+                lng: Number(firstPoint[1]),
+                next_stop: String(opt.end_stop || fallbackDestination || 'Destination'),
+                destination_stop: String(opt.end_stop || fallbackDestination || 'Destination'),
+                destination_coords: [Number(lastPoint[0]), Number(lastPoint[1])],
+                baseFare: Math.max(20, Number((20 + etaMin * 2.5).toFixed(0))),
+                polyline,
+                departure,
+                start_stop: String(opt.start_stop || fallbackBoarding || 'Nearby stop'),
+                boarding_coords: [Number(firstPoint[0]), Number(firstPoint[1])],
+                stops,
+            };
+        }
+
+        function clearRoutePreviewMarkers() {
+            routePreviewMarkers.forEach((layer) => {
+                if (routeMapInstance && layer) routeMapInstance.removeLayer(layer);
+            });
+            routePreviewMarkers = [];
+        }
+
+        function focusRouteCandidate(index, fitBounds = true) {
+            if (!availableBuses.length) return;
+
+            selectedResultIndex = Math.max(0, Math.min(index, availableBuses.length - 1));
+            const selectedBus = availableBuses[selectedResultIndex];
+
+            document.querySelectorAll('[data-bus-card-index]').forEach((card) => {
+                const isActive = Number(card.dataset.busCardIndex) === selectedResultIndex;
+                card.classList.toggle('border-brand-700', isActive);
+                card.classList.toggle('shadow-[0_12px_30px_rgba(47,72,88,0.12)]', isActive);
+                card.classList.toggle('ring-2', isActive);
+                card.classList.toggle('ring-brand-100', isActive);
+            });
+
+            if (!routeMapInstance) return;
+
+            routePreviewLines.forEach((line, idx) => {
+                line.setStyle({
+                    color: routeColor(idx),
+                    weight: idx === selectedResultIndex ? 6 : 3,
+                    opacity: idx === selectedResultIndex ? 0.95 : 0.28,
+                });
+            });
+
+            clearRoutePreviewMarkers();
+            const bounds = L.latLngBounds();
+
+            if (currentJourney.userGeo) {
+                const marker = L.circleMarker([currentJourney.userGeo.lat, currentJourney.userGeo.lon], {
+                    radius: 7,
+                    fillColor: '#2563eb',
+                    color: '#fff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.95,
+                }).addTo(routeMapInstance).bindPopup('Your live location');
+                routePreviewMarkers.push(marker);
+                bounds.extend([currentJourney.userGeo.lat, currentJourney.userGeo.lon]);
+            }
+
+            if (Array.isArray(selectedBus.boarding_coords)) {
+                const marker = L.circleMarker(selectedBus.boarding_coords, {
+                    radius: 7,
+                    fillColor: '#f59e0b',
+                    color: '#fff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.95,
+                }).addTo(routeMapInstance).bindPopup(`Board here: ${selectedBus.start_stop}`);
+                routePreviewMarkers.push(marker);
+                bounds.extend(selectedBus.boarding_coords);
+            }
+
+            if (Array.isArray(selectedBus.destination_coords)) {
+                const marker = L.circleMarker(selectedBus.destination_coords, {
+                    radius: 7,
+                    fillColor: '#10b981',
+                    color: '#fff',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.95,
+                }).addTo(routeMapInstance).bindPopup(`Destination: ${selectedBus.destination_stop}`);
+                routePreviewMarkers.push(marker);
+                bounds.extend(selectedBus.destination_coords);
+            }
+
+            if (Array.isArray(selectedBus.polyline)) {
+                selectedBus.polyline.forEach((point) => bounds.extend([point[0], point[1]]));
+            }
+
+            if (fitBounds && bounds.isValid()) {
+                routeMapInstance.fitBounds(bounds, { padding: [40, 40] });
+            }
+        }
+
+        function clearTrackingJourneyMarkers() {
+            trackingJourneyMarkers.forEach((layer) => {
+                if (map && layer) map.removeLayer(layer);
+            });
+            trackingJourneyMarkers = [];
+        }
+
+        function refreshTrackingJourneyMarkers() {
+            if (!map || !currentActiveBus) return;
+
+            clearTrackingJourneyMarkers();
+
+            if (currentJourney.userGeo) {
+                trackingJourneyMarkers.push(
+                    L.circleMarker([currentJourney.userGeo.lat, currentJourney.userGeo.lon], {
+                        radius: 7,
+                        fillColor: '#2563eb',
+                        color: '#fff',
+                        weight: 2,
+                        opacity: 1,
+                        fillOpacity: 0.95,
+                    }).addTo(map).bindPopup('You')
+                );
+            }
+
+            if (Array.isArray(currentActiveBus.boarding_coords)) {
+                trackingJourneyMarkers.push(
+                    L.circleMarker(currentActiveBus.boarding_coords, {
+                        radius: 7,
+                        fillColor: '#f59e0b',
+                        color: '#fff',
+                        weight: 2,
+                        opacity: 1,
+                        fillOpacity: 0.9,
+                    }).addTo(map).bindPopup(`Boarding stop: ${currentActiveBus.start_stop}`)
+                );
+            }
+
+            if (Array.isArray(currentActiveBus.destination_coords)) {
+                trackingJourneyMarkers.push(
+                    L.circleMarker(currentActiveBus.destination_coords, {
+                        radius: 7,
+                        fillColor: '#10b981',
+                        color: '#fff',
+                        weight: 2,
+                        opacity: 1,
+                        fillOpacity: 0.9,
+                    }).addTo(map).bindPopup(`Destination: ${currentActiveBus.destination_stop || currentActiveBus.next_stop}`)
+                );
+            }
+        }
 
         function updateFullscreenInfo() {
             if (!currentActiveBus) return;
@@ -762,11 +1017,13 @@
         function logout() {
             isLoggedIn = false;
             clearInterval(liveInterval);
+            clearPassengerLocationRefresh();
             checkAuth();
         }
 
         function goSearch() {
             clearInterval(liveInterval);
+            clearPassengerLocationRefresh();
             updateNavColors('nav-search');
             loadStopsData().catch(() => {});
             showView('view-search');
@@ -774,6 +1031,7 @@
 
         function goTickets() {
             clearInterval(liveInterval);
+            clearPassengerLocationRefresh();
             updateNavColors('nav-tickets');
             renderTickets();
             showView('view-tickets');
@@ -781,6 +1039,7 @@
 
         function goResults() {
             clearInterval(liveInterval);
+            clearPassengerLocationRefresh();
             updateNavColors('nav-search');
             showView('view-results');
         }
@@ -802,6 +1061,9 @@
                 const toInput = document.getElementById('input-to');
                 const fromName = (fromInput.value || '').trim();
                 const toName = (toInput.value || '').trim();
+                let liveGeo = null;
+                let resolvedStartStop = fromName;
+                let autoDetectedStart = false;
 
                 console.log('[DEBUG] From:', fromName, '| To:', toName);
 
@@ -823,19 +1085,16 @@
                     }
                     params.set('start_id', startIds.join(','));
                 } else {
-                    const geo = await getUserPosition();
-                    if (!geo) {
-                        alert('Please enter a start stop or allow location access.');
-                        return;
-                    }
+                    liveGeo = await refreshPassengerLocation(true);
+                    params.set('u_lat', liveGeo.lat);
+                    params.set('u_lon', liveGeo.lon);
 
-                    params.set('u_lat', geo.lat);
-                    params.set('u_lon', geo.lon);
-
-                    const nearestRes = await fetch(`${API_BASE}/api/nearest-stop?lat=${geo.lat}&lon=${geo.lon}`);
+                    const nearestRes = await fetch(`${API_BASE}/api/nearest-stop?lat=${liveGeo.lat}&lon=${liveGeo.lon}`);
                     if (nearestRes.ok) {
                         const nearestData = await nearestRes.json();
                         if (nearestData.stop_name) {
+                            resolvedStartStop = nearestData.stop_name;
+                            autoDetectedStart = true;
                             fromInput.value = nearestData.stop_name;
                         }
                     }
@@ -847,32 +1106,20 @@
                 }
 
                 const data = await response.json();
-                availableBuses = (data.options || []).slice(0, 5).map((opt, index) => {
-                    const polyline = Array.isArray(opt.polyline) ? opt.polyline : [];
-                    const firstPoint = polyline[0] || opt.start_coords || [18.5204, 73.8567];
-                    const etaMin = Number(opt.eta || 0);
-                    const departure = String(opt.departure || '--:--:--');
-                    const stops = Array.isArray(opt.stops) ? opt.stops : [];
-                    
-                    return {
-                        id: `${String(opt.bus_no || 'BUS')}-${index}`,
-                        liveBusId: String(opt.bus_no || `BUS-${index + 1}`),
-                        route: opt.is_transfer ? `Transfer route (${departure})` : `Direct route (${departure})`,
-                        eta: `${etaMin} min`,
-                        distance: `${Number(opt.walk_dist || 0)} m walk`,
-                        lat: Number(firstPoint[0]),
-                        lng: Number(firstPoint[1]),
-                        next_stop: toName || 'Destination',
-                        baseFare: Math.max(20, Number((20 + etaMin * 2.5).toFixed(0))),
-                        polyline,
-                        departure,
-                        start_stop: String(opt.start_stop || fromInput.value || 'Nearby stop'),
-                        stops: stops,
-                    };
+                availableBuses = (data.options || []).slice(0, 5).map((opt, index) =>
+                    mapPlanOption(opt, index, toName, resolvedStartStop || fromInput.value || 'Nearby stop')
+                );
+
+                setJourneyContext({
+                    userGeo: liveGeo || currentJourney.userGeo,
+                    boardingStop: resolvedStartStop || fromInput.value || 'Nearby stop',
+                    destinationStop: toName,
+                    autoDetectedStart,
                 });
 
                 renderBusResults();
                 initRouteMap();
+                focusRouteCandidate(0);
                 console.log('[DEBUG] Showing results view with', availableBuses.length, 'buses');
                 showView('view-results');
             } catch (err) {
@@ -887,17 +1134,17 @@
 
         async function autoDetectFromLocation() {
             const fromInput = document.getElementById('input-from');
-            const btn = event.target.closest('button');
+            const btn = document.activeElement && document.activeElement.closest('button')
+                ? document.activeElement.closest('button')
+                : document.querySelector('button[title="Auto-detect my location"]');
             
             try {
-                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-                btn.disabled = true;
-                
-                const geo = await getUserPosition();
-                if (!geo) {
-                    alert('Please enable location access');
-                    return;
+                if (btn) {
+                    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+                    btn.disabled = true;
                 }
+                
+                const geo = await refreshPassengerLocation(true);
                 
                 const nearestRes = await fetch(`${API_BASE}/api/nearest-stop?lat=${geo.lat}&lon=${geo.lon}`);
                 if (!nearestRes.ok) throw new Error('Could not find nearby stop');
@@ -905,6 +1152,10 @@
                 const nearestData = await nearestRes.json();
                 if (nearestData.stop_name) {
                     fromInput.value = nearestData.stop_name;
+                    setJourneyContext({
+                        boardingStop: nearestData.stop_name,
+                        autoDetectedStart: true,
+                    });
                     fromInput.classList.add('bg-blue-50');
                     setTimeout(() => fromInput.classList.remove('bg-blue-50'), 1500);
                     console.log('[DEBUG] Auto-detected from location:', nearestData.stop_name);
@@ -913,8 +1164,10 @@
                 console.error('[ERROR] Auto-detect failed:', err);
                 alert('Could not detect your location');
             } finally {
-                btn.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i>';
-                btn.disabled = false;
+                if (btn) {
+                    btn.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i>';
+                    btn.disabled = false;
+                }
             }
         }
 
@@ -927,11 +1180,7 @@
                 console.log('[DEBUG] Finding buses near current location...');
                 await loadStopsData();
                 
-                const geo = await getUserPosition();
-                if (!geo) {
-                    alert('Please enable location access to find nearby buses');
-                    return;
-                }
+                const geo = await refreshPassengerLocation(true);
                 
                 console.log('[DEBUG] User location:', geo.lat, geo.lon);
                 
@@ -983,33 +1232,21 @@
                 
                 console.log('[DEBUG] Found', data.options.length, 'nearby buses');
                 
-                availableBuses = (data.options || []).slice(0, 5).map((opt, index) => {
-                    const polyline = Array.isArray(opt.polyline) ? opt.polyline : [];
-                    const firstPoint = polyline[0] || opt.start_coords || [18.5204, 73.8567];
-                    const etaMin = Number(opt.eta || 0);
-                    const departure = String(opt.departure || '--:--:--');
-                    const stops = Array.isArray(opt.stops) ? opt.stops : [];
-                    
-                    return {
-                        id: `${String(opt.bus_no || 'BUS')}-${index}`,
-                        liveBusId: String(opt.bus_no || `BUS-${index + 1}`),
-                        route: opt.is_transfer ? `Transfer route (${departure})` : `Direct route (${departure})`,
-                        eta: `${etaMin} min`,
-                        distance: `${Number(opt.walk_dist || 0)} m walk`,
-                        lat: Number(firstPoint[0]),
-                        lng: Number(firstPoint[1]),
-                        next_stop: selectedDestinations[0] || 'Destination',
-                        baseFare: Math.max(20, Number((20 + etaMin * 2.5).toFixed(0))),
-                        polyline,
-                        departure,
-                        start_stop: nearestData.stop_name || 'Your Location',
-                        stops: stops,
-                    };
+                availableBuses = (data.options || []).slice(0, 5).map((opt, index) =>
+                    mapPlanOption(opt, index, selectedDestinations[0] || 'Destination', nearestData.stop_name || 'Your Location')
+                );
+
+                setJourneyContext({
+                    userGeo: geo,
+                    boardingStop: nearestData.stop_name || 'Your Location',
+                    destinationStop: selectedDestinations[0] || 'Destination',
+                    autoDetectedStart: true,
                 });
 
                 console.log('[DEBUG] Showing', availableBuses.length, 'buses');
                 renderBusResults();
                 initRouteMap();
+                focusRouteCandidate(0);
                 document.getElementById('input-from').value = nearestData.stop_name;
                 document.getElementById('input-to').value = selectedDestinations[0] || '';
                 showView('view-results');
@@ -1040,44 +1277,27 @@
                     attribution: '&copy; OpenStreetMap'
                 }).addTo(routeMapInstance);
 
-                const polylines = [];
+                routePreviewLines = [];
                 const bounds = L.latLngBounds();
                 
                 availableBuses.forEach((bus, idx) => {
                     if (Array.isArray(bus.polyline) && bus.polyline.length > 1) {
-                        const color = ['#344d67', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][idx % 5];
+                        const color = routeColor(idx);
                         const line = L.polyline(bus.polyline, { color, weight: 3, opacity: 0.7 }).addTo(routeMapInstance);
-                        polylines.push(line);
+                        routePreviewLines.push(line);
                         
-                        // Add bounds for all points
                         bus.polyline.forEach(point => {
                             bounds.extend([point[0], point[1]]);
                         });
                     }
                 });
 
-                // Add start and end markers
-                if (availableBuses.length > 0) {
-                    const firstBus = availableBuses[0];
-                    if (firstBus.lat && firstBus.lng) {
-                        L.circleMarker([firstBus.lat, firstBus.lng], {
-                            radius: 6,
-                            fillColor: '#2f4858',
-                            color: '#fff',
-                            weight: 2,
-                            opacity: 1,
-                            fillOpacity: 0.8
-                        }).addTo(routeMapInstance).bindPopup('Start');
-                    }
-                }
-
-                // Fit map to bounds
                 if (bounds.isValid()) {
                     routeMapInstance.fitBounds(bounds, { padding: [40, 40] });
                 }
                 
-                // Trigger resize to fix any display issues
                 routeMapInstance.invalidateSize();
+                focusRouteCandidate(selectedResultIndex, false);
             }, 100);
         }
 
@@ -1090,11 +1310,12 @@
 
             availableBuses.forEach((bus, idx) => {
                 const card = document.createElement('div');
-                card.className = 'bg-white rounded-xl border border-slate-200 shadow-sm animate-fade-in overflow-hidden';
+                card.className = 'bg-white rounded-xl border border-slate-200 shadow-sm animate-fade-in overflow-hidden cursor-pointer';
+                card.dataset.busCardIndex = String(idx);
+                card.addEventListener('click', () => focusRouteCandidate(idx));
                 
                 const etaMinutes = parseInt(bus.eta);
-                const colors = ['#344d67', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
-                const color = colors[idx % 5];
+                const color = routeColor(idx);
 
                 card.innerHTML = `
                     <div style="border-top: 4px solid ${color};" class="p-4 space-y-3">
@@ -1117,6 +1338,7 @@
                             <div class="flex-1 min-w-0">
                                 <div class="font-bold text-[13px] text-slate-800 leading-tight">${bus.liveBusId}</div>
                                 <div class="text-[10px] text-slate-500 mt-0.5">${bus.route}</div>
+                                <div class="text-[10px] text-blue-600 mt-1 font-semibold">Board at ${bus.start_stop}</div>
                             </div>
                             <div class="text-right text-[10px]">
                                 <div class="font-bold text-slate-800">Every 50 min</div>
@@ -1166,6 +1388,9 @@
 
                         <!-- CTA Buttons -->
                         <div class="flex gap-2 pt-2">
+                            <button onclick="event.stopPropagation(); focusRouteCandidate(${idx});" class="flex-1 bg-white border border-slate-200 hover:border-slate-300 text-slate-600 font-bold rounded-lg py-2.5 text-[11px] tracking-wide transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+                                <i class="fa-solid fa-route"></i> PREVIEW
+                            </button>
                             <button onclick="startTracking('${bus.id}')" class="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold rounded-lg py-2.5 text-[11px] tracking-wide transition-colors flex items-center justify-center gap-1.5 shadow-sm">
                                 <i class="fa-solid fa-location-crosshairs"></i> TRACK
                             </button>
@@ -1222,6 +1447,10 @@
         function startTracking(busId) {
             const bus = availableBuses.find(b => b.id === busId) || availableBuses.find(b => b.liveBusId === busId);
             if (!bus) return;
+            const busIndex = availableBuses.findIndex((item) => item.id === bus.id || item.liveBusId === bus.liveBusId);
+            if (busIndex >= 0) {
+                focusRouteCandidate(busIndex, false);
+            }
             currentActiveBus = JSON.parse(JSON.stringify(bus));
             simulatedStepIndex = 0;
 
@@ -1238,6 +1467,7 @@
             showView('view-tracking');
             updateNavColors(null);
             initMap(currentActiveBus);
+            startPassengerLocationRefresh();
 
             // Poll the live engine every 3 seconds
             liveInterval = setInterval(updateLiveLocation, 3000);
@@ -1275,6 +1505,7 @@
             });
 
             busMarker = L.marker([bus.lat, bus.lng], {icon: busDivIcon}).addTo(map);
+            refreshTrackingJourneyMarkers();
             updateTelemetryUI(bus.lat, bus.lng);
         }
 
