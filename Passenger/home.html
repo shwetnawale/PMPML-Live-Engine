@@ -400,6 +400,10 @@
       if (fromStore) return fromStore;
       const h = window.location.hostname;
       if (h === 'localhost' || h === '127.0.0.1') return '';
+      // Served from a real HTTP/S server (e.g. accessed via ngrok URL directly) —
+      // use the current origin so relative API calls route to the same server.
+      const proto = window.location.protocol;
+      if (proto === 'http:' || proto === 'https:') return window.location.origin;
       return '';
     })();
 
@@ -442,7 +446,7 @@
     }
 
     function isNgrokBase() {
-      return Boolean(API_BASE) && API_BASE.includes('ngrok-free.app');
+      return Boolean(API_BASE) && /ngrok-free\.(app|dev)|ngrok\.io|ngrok\.app/.test(API_BASE);
     }
 
     function isLocalHost() {
