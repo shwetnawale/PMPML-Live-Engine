@@ -708,7 +708,16 @@
       );
 
       if (!matchedRoutes.length) {
-        setStatus(selectorStatus, 'Stop selected. Could not find mapped routes for this stop.', 'warn');
+        // Route hints from stop don't match any live route (e.g. GTFS numeric IDs vs label IDs).
+        // Fall back to showing all live buses so the user can still pick one to track.
+        const liveBuses = selectorPayload.buses || [];
+        fillSelect(busSelect, liveBuses, (b) => `${b.bus_id} ${b.route ? `| ${b.route}` : ''}`, (b) => b.bus_id);
+        if (!busSelect.value) {
+          const firstBus = firstNonEmptySelectValue(busSelect);
+          if (firstBus) busSelect.value = firstBus;
+        }
+        fillSelect(routeSelect, selectorPayload.routes || [], (r) => r.route_label || r.route_id, (r) => r.route_id || r.route_label);
+        setStatus(selectorStatus, 'Stop has no live route match. Showing all live buses — pick one to track.', 'warn');
         return;
       }
 
